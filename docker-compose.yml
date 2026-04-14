@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: neighborhealth
+      POSTGRES_PASSWORD: neighborhealth
+      POSTGRES_DB: neighborhealth
+    ports:
+      - "5432:5432"
+    volumes:
+      - nh_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neighborhealth -d neighborhealth"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  nh_pgdata:

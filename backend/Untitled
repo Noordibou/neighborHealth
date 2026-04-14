@@ -1,0 +1,7 @@
+DATABASE_URL=postgresql+asyncpg://neighborhealth:neighborhealth@localhost:5432/neighborhealth
+JWT_SECRET=change-me-in-production
+ANTHROPIC_API_KEY=
+MAPBOX_TOKEN=
+CENSUS_API_KEY=
+CDC_API_KEY=
+CORS_ORIGINS=http://localhost:3000

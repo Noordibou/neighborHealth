@@ -1,0 +1,11 @@
+.env
+.env.local
+.venv
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.next/
+node_modules/
+backend/tmp_exports/
+*.pdf
