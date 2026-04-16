@@ -23,6 +23,7 @@ import io
 import logging
 import math
 import os
+import random
 import tempfile
 import zipfile
 from collections import defaultdict
@@ -30,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import pandas as pd
 import httpx
 from geoalchemy2.shape import from_shape
 from shapely.geometry import MultiPolygon, Polygon
@@ -195,6 +197,13 @@ async def fetch_places_states(
 
 
 def _read_tiger_gdf_from_zip(content: bytes) -> gpd.GeoDataFrame:
+    # Census/Cloudflare sometimes returns HTTP 200 with an HTML "Request Rejected" page instead of a ZIP.
+    if not content.startswith(b"PK"):
+        preview = content[:400].decode("utf-8", errors="replace")
+        raise ValueError(
+            "Expected a ZIP shapefile from Census (bytes starting with PK), but got non-ZIP content. "
+            f"Preview: {preview!r}"
+        )
     zf = zipfile.ZipFile(io.BytesIO(content))
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -208,12 +217,109 @@ def _read_tiger_gdf_from_zip(content: bytes) -> gpd.GeoDataFrame:
     return gdf
 
 
+async def _download_binary(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    timeout: float = 600.0,
+    max_retries: int = 6,
+) -> bytes:
+    """
+    Census TIGER downloads are large; connections often drop mid-body (RemoteProtocolError).
+    Retry with exponential backoff (Census / Cloudflare often reset long transfers).
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(max_retries):
+        try:
+            r = await client.get(url, timeout=timeout)
+            r.raise_for_status()
+            return r.content
+        except httpx.HTTPStatusError as e:
+            last_exc = e
+            if e.response.status_code not in (502, 503, 504) or attempt == max_retries - 1:
+                raise
+        except (
+            httpx.RemoteProtocolError,
+            httpx.ReadTimeout,
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.WriteError,
+        ) as e:
+            last_exc = e
+            if attempt == max_retries - 1:
+                raise
+        wait = min(2**attempt + random.uniform(0, 2), 60.0)
+        log.warning(
+            "Download attempt %s/%s failed for %s: %s — retrying in %.1fs",
+            attempt + 1,
+            max_retries,
+            url,
+            last_exc,
+            wait,
+        )
+        await asyncio.sleep(wait)
+    raise RuntimeError("_download_binary: exhausted retries without raising")
+
+
 async def load_tiger_tracts(client: httpx.AsyncClient, state_fips: str) -> gpd.GeoDataFrame:
     url = f"https://www2.census.gov/geo/tiger/TIGER{TIGER_YEAR}/TRACT/tl_{TIGER_YEAR}_{state_fips}_tract.zip"
     log.info("Downloading TIGER %s", url)
-    r = await client.get(url, timeout=120.0)
-    r.raise_for_status()
-    return await asyncio.to_thread(_read_tiger_gdf_from_zip, r.content)
+    content = await _download_binary(client, url, timeout=600.0)
+    return await asyncio.to_thread(_read_tiger_gdf_from_zip, content)
+
+
+async def load_tiger_us_counties(client: httpx.AsyncClient) -> gpd.GeoDataFrame:
+    """Nationwide county file (state-specific county URLs often return HTML instead of ZIP)."""
+    url = f"https://www2.census.gov/geo/tiger/TIGER{TIGER_YEAR}/COUNTY/tl_{TIGER_YEAR}_us_county.zip"
+    log.info("Downloading TIGER US counties %s", url)
+    content = await _download_binary(client, url, timeout=600.0)
+    return await asyncio.to_thread(_read_tiger_gdf_from_zip, content)
+
+
+async def load_tiger_places(client: httpx.AsyncClient, state_fips: str) -> gpd.GeoDataFrame:
+    url = f"https://www2.census.gov/geo/tiger/TIGER{TIGER_YEAR}/PLACE/tl_{TIGER_YEAR}_{state_fips}_place.zip"
+    log.info("Downloading TIGER places %s", url)
+    content = await _download_binary(client, url, timeout=600.0)
+    return await asyncio.to_thread(_read_tiger_gdf_from_zip, content)
+
+
+def _county_lookup_from_gdf(county_gdf: gpd.GeoDataFrame) -> dict[tuple[str, str], str]:
+    out: dict[tuple[str, str], str] = {}
+    for _, crow in county_gdf.iterrows():
+        st = str(crow["STATEFP"]).zfill(2)
+        co = str(crow["COUNTYFP"]).zfill(3)
+        nm = crow.get("NAME") or crow.get("NAMELSAD")
+        if nm is not None and str(nm).strip():
+            out[(st, co)] = str(nm).strip()
+    return out
+
+
+def _place_by_tract_geoid(
+    tract_gdf: gpd.GeoDataFrame,
+    place_gdf: gpd.GeoDataFrame,
+    geoid_col: str,
+) -> dict[str, str]:
+    """Map tract GEOID → place name (incorporated place / CDP) via centroid-in-polygon."""
+    if tract_gdf.empty or place_gdf.empty:
+        return {}
+    if tract_gdf.crs != place_gdf.crs:
+        place_gdf = place_gdf.to_crs(tract_gdf.crs)
+    tg = tract_gdf[[geoid_col, "geometry"]].copy()
+    pts = tg.copy()
+    pts["geometry"] = tg.geometry.centroid
+    name_col = "NAME" if "NAME" in place_gdf.columns else "NAMELSAD"
+    pj = place_gdf[[name_col, "geometry"]].copy()
+    joined = gpd.sjoin(pts, pj, how="left", predicate="within")
+    out: dict[str, str] = {}
+    for gid, grp in joined.groupby(geoid_col):
+        row = grp.iloc[0]
+        nm = row.get(name_col)
+        if pd.isna(nm):
+            continue
+        s = str(nm).strip()
+        if s:
+            out[str(gid)] = s
+    return out
 
 
 def urban_rural_class(aland: float | None) -> str:
@@ -224,7 +330,13 @@ def urban_rural_class(aland: float | None) -> str:
     return "urban"
 
 
-async def upsert_tract_row(session: AsyncSession, row: Any, geoid_col: str) -> None:
+async def upsert_tract_row(
+    session: AsyncSession,
+    row: Any,
+    geoid_col: str,
+    *,
+    county_name: str | None = None,
+) -> None:
     gid = str(row[geoid_col])
     geom: Polygon | MultiPolygon | None = row.geometry
     if geom is None or geom.is_empty:
@@ -242,7 +354,7 @@ async def upsert_tract_row(session: AsyncSession, row: Any, geoid_col: str) -> N
             name=str(name) if name is not None else None,
             state_fips=str(row["STATEFP"]).zfill(2),
             county_fips=county_fp,
-            county_name=None,
+            county_name=county_name,
             place_name=None,
             urban_rural=urban_rural_class(aland),
             centroid_lat=float(centroid.y),
@@ -256,6 +368,8 @@ async def upsert_tract_row(session: AsyncSession, row: Any, geoid_col: str) -> N
         t.centroid_lon = float(centroid.x)
         t.geometry = from_shape(geom, srid=4326)
         t.urban_rural = urban_rural_class(aland)
+        if county_name is not None:
+            t.county_name = county_name
 
 
 async def replace_indicators(
@@ -324,10 +438,13 @@ async def run_ingest(states: list[str]) -> None:
     async with async_session() as session:
         abbrs = [STATE_FP_TO_ABBR[s.zfill(2)] for s in states]
 
-        async with httpx.AsyncClient(timeout=120.0) as http:
+        async with httpx.AsyncClient(timeout=600.0) as http:
             log.info("Fetching PLACES…")
             places = await fetch_places_states(http, abbrs, cdc_token)
             log.info("PLACES rows: %s", len(places))
+
+            log.info("Loading TIGER US county boundaries (once)…")
+            us_county_gdf = await load_tiger_us_counties(http)
 
             for sf in states:
                 sf = sf.zfill(2)
@@ -336,8 +453,26 @@ async def run_ingest(states: list[str]) -> None:
                 gdf = await load_tiger_tracts(http, sf)
                 geoid_col = "GEOID20" if "GEOID20" in gdf.columns else "GEOID"
 
+                county_gdf = us_county_gdf[us_county_gdf["STATEFP"].astype(str).str.zfill(2) == sf].copy()
+                county_lookup = _county_lookup_from_gdf(county_gdf)
+                try:
+                    place_gdf = await load_tiger_places(http, sf)
+                    place_by_geoid = _place_by_tract_geoid(gdf, place_gdf, geoid_col)
+                except Exception as e:
+                    log.warning("TIGER places for state %s failed (%s); place_name will stay empty for this state", sf, e)
+                    place_by_geoid = {}
+
                 for _, row in gdf.iterrows():
-                    await upsert_tract_row(session, row, geoid_col)
+                    st = str(row["STATEFP"]).zfill(2)
+                    co = str(row["COUNTYFP"]).zfill(3)
+                    cn = county_lookup.get((st, co))
+                    await upsert_tract_row(session, row, geoid_col, county_name=cn)
+                await session.commit()
+
+                for gid, pname in place_by_geoid.items():
+                    t = await session.get(Tract, gid)
+                    if t is not None:
+                        t.place_name = pname
                 await session.commit()
 
                 for _, row in gdf.iterrows():

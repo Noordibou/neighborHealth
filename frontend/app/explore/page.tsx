@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { NeighborMap } from "@/components/NeighborMap";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getMapGeoJSON, getTract, getTractList, searchTracts } from "@/lib/api";
+import { getMapGeoJSON, getTract, getTractList, searchTracts, type SearchResultRow } from "@/lib/api";
 
 const STATES = [
   { fips: "06", label: "California" },
@@ -27,12 +27,14 @@ type Preview = { rent: number | null; uninsured: number | null };
 function ExploreInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const initialQ = sp.get("q") ?? "";
+  const initialQ = sp.get("q")?.trim() ?? "";
 
-  const [stateFips, setStateFips] = useState("06");
+  const [stateFips, setStateFips] = useState<string | null>(null);
   const [geojson, setGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState(initialQ);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResultRow[] | null>(null);
   const [ranked, setRanked] = useState<
     { geoid: string; composite_score: number | null; name: string | null; county_name: string | null }[]
   >([]);
@@ -54,13 +56,43 @@ function ExploreInner() {
   });
 
   useEffect(() => {
+    if (!stateFips) {
+      setGeojson(null);
+      setErr(null);
+      return;
+    }
     setErr(null);
     getMapGeoJSON(stateFips)
       .then(setGeojson)
       .catch((e: Error) => setErr(e.message));
   }, [stateFips]);
 
+  /** Home page sends ?q= — run one search and go to the tract (no map fetch on explore). */
+  useEffect(() => {
+    if (!initialQ) return;
+    const key = `nh-explore-q-${initialQ}`;
+    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(key)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await searchTracts(initialQ);
+        if (cancelled || !r.results[0]) return;
+        if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, "1");
+        router.replace(`/tract/${r.results[0].geoid}`);
+      } catch {
+        /* stay on explore; user can search again */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialQ, router]);
+
   const fetchList = useCallback(() => {
+    if (!stateFips) {
+      setRanked([]);
+      return;
+    }
     const params: Record<string, string | undefined> = {
       state: stateFips,
       limit: "50",
@@ -123,11 +155,23 @@ function ExploreInner() {
   async function onSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!q.trim()) return;
-    const r = await searchTracts(q);
-    if (r.results[0]) {
-      const d = await getTract(r.results[0].geoid);
-      setStateFips(d.state_fips);
-      router.push(`/tract/${d.geoid}`);
+    setSearchError(null);
+    setSearchResults(null);
+    try {
+      const r = await searchTracts(q.trim());
+      if (!r.results.length) {
+        setSearchError(
+          "No matches. Try a city (place name), county, state name or two-letter code (e.g. CA), or full census tract GEOID."
+        );
+        return;
+      }
+      if (r.results.length === 1) {
+        router.push(`/tract/${r.results[0].geoid}`);
+        return;
+      }
+      setSearchResults(r.results);
+    } catch (err: unknown) {
+      setSearchError(err instanceof Error ? err.message : "Search failed.");
     }
   }
 
@@ -148,8 +192,11 @@ function ExploreInner() {
     [router]
   );
 
-  const stateLabel = useMemo(() => STATES.find((s) => s.fips === stateFips)?.label ?? stateFips, [stateFips]);
-  const stateAbbr = STATE_ABBR[stateFips] ?? stateFips;
+  const stateLabel = useMemo(() => {
+    if (!stateFips) return "Choose a state";
+    return STATES.find((s) => s.fips === stateFips)?.label ?? stateFips;
+  }, [stateFips]);
+  const stateAbbr = stateFips ? STATE_ABBR[stateFips] ?? stateFips : "";
 
   const featureCount = geojson?.features?.length ?? 0;
   const noData = !err && geojson != null && featureCount === 0;
@@ -161,6 +208,10 @@ function ExploreInner() {
           <div className="max-h-[48vh] overflow-y-auto p-4 lg:max-h-[calc(100vh-4rem)]">
             <form onSubmit={onSearchSubmit} className="mb-6">
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Search</label>
+              <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                Matches place (city), county, state, or GEOID prefix/suffix. Results are ranked by risk score when
+                available.
+              </p>
               <div className="mt-1 flex gap-2">
                 <div className="relative flex-1">
                   <svg
@@ -173,7 +224,7 @@ function ExploreInner() {
                   </svg>
                   <input
                     className="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-3 text-sm text-[#0f2940] placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                    placeholder="Search by city, county, or census t"
+                    placeholder="City, county, state, or census tract GEOID"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                   />
@@ -182,6 +233,23 @@ function ExploreInner() {
                   Go
                 </button>
               </div>
+              {searchError && <p className="mt-2 text-xs text-red-600">{searchError}</p>}
+              {searchResults && searchResults.length > 1 && (
+                <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
+                  {searchResults.map((r) => (
+                    <li key={r.geoid}>
+                      <button
+                        type="button"
+                        className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-white"
+                        onClick={() => router.push(`/tract/${r.geoid}`)}
+                      >
+                        <span className="font-medium text-[#0f2940]">{r.name ?? r.geoid}</span>
+                        {r.county_name ? <span className="text-slate-500"> · {r.county_name}</span> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </form>
 
             <div className="mb-4">
@@ -194,6 +262,18 @@ function ExploreInner() {
                 <span className="text-slate-400">▾</span>
               </button>
               <ul className="mt-2 space-y-2">
+                <li>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="state"
+                      checked={stateFips === null}
+                      onChange={() => setStateFips(null)}
+                      className="rounded-full border-slate-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    United States (overview — no tract data loaded)
+                  </label>
+                </li>
                 {STATES.map((s) => (
                   <li key={s.fips}>
                     <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
@@ -300,6 +380,9 @@ function ExploreInner() {
             <div className="mt-8">
               <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Top high-risk tracts</h2>
               <p className="text-xs text-slate-400">{stateLabel}</p>
+              {!stateFips && (
+                <p className="mt-3 text-xs text-slate-500">Select a state above to load rankings and the choropleth map.</p>
+              )}
               {noData && (
                 <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
                   No tract rows in the database yet. Run the ingest script (see repo README) to load boundaries and
@@ -310,7 +393,9 @@ function ExploreInner() {
                 {ranked.slice(0, 8).map((r) => {
                   const pv = previews[r.geoid];
                   const label = r.name ?? `Tract ${r.geoid}`;
-                  const sub = r.county_name ? `${r.county_name.split(",")[0]?.trim()}, ${stateAbbr}` : stateAbbr;
+                  const sub = r.county_name
+                    ? `${r.county_name.split(",")[0]?.trim()}${stateAbbr ? `, ${stateAbbr}` : ""}`
+                    : stateAbbr || "—";
                   return (
                     <li key={r.geoid}>
                       <button
@@ -340,12 +425,15 @@ function ExploreInner() {
 
         <div className="relative min-h-[420px] flex-1 p-3 lg:min-h-0 lg:p-4">
           {err && <p className="mb-2 text-sm text-red-600">{err}</p>}
-          {!err && geojson == null && (
+          {stateFips != null && !err && geojson == null && (
             <div className="flex min-h-[400px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/80 text-sm text-slate-500">
               Loading map data…
             </div>
           )}
-          {noData && (
+          {!stateFips && !err && (
+            <NeighborMap stateFips={null} data={null} variant="explore" onSelectTract={onSelectTract} />
+          )}
+          {stateFips != null && geojson != null && noData && (
             <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
               <p className="font-semibold">No map data for this state</p>
               <p className="mt-1 text-amber-900/90">
@@ -362,7 +450,7 @@ function ExploreInner() {
               </p>
             </div>
           )}
-          {geojson && featureCount > 0 && (
+          {stateFips != null && geojson != null && (
             <NeighborMap
               stateFips={stateFips}
               data={geojson}

@@ -86,10 +86,16 @@ export function getCompare(geoids: string[]) {
   }>(`/api/compare?geoids=${encodeURIComponent(q)}`);
 }
 
+export type SearchResultRow = {
+  geoid: string;
+  name: string | null;
+  state_fips: string;
+  county_name: string | null;
+  composite_score: number | null;
+};
+
 export function searchTracts(q: string) {
-  return api<{ results: { geoid: string; name: string | null; composite_score: number | null }[] }>(
-    `/api/search?q=${encodeURIComponent(q)}`
-  );
+  return api<{ query: string; results: SearchResultRow[] }>(`/api/search?q=${encodeURIComponent(q)}`);
 }
 
 export async function postPdfExport(geoid: string) {

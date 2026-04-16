@@ -20,8 +20,10 @@ const METRICS = [
 ] as const;
 
 type Props = {
-  stateFips: string;
-  data: GeoJSON.FeatureCollection;
+  /** When null, map shows the continental US overview with no tract layer. */
+  stateFips: string | null;
+  /** When null or empty, no tract choropleth is drawn (overview mode). */
+  data: GeoJSON.FeatureCollection | null;
   mapStyle?: string;
   onSelectTract?: (geoid: string) => void;
   /** Full controls on left vs compact overlay (explore dashboard) */
@@ -85,6 +87,7 @@ export function NeighborMap({ stateFips, data, mapStyle, onSelectTract, variant 
   );
 
   const center = useMemo(() => {
+    if (stateFips == null) return [-98, 39] as [number, number];
     const c: Record<string, [number, number]> = {
       "06": [-119, 37],
       "12": [-81.5, 27.5],
@@ -94,6 +97,9 @@ export function NeighborMap({ stateFips, data, mapStyle, onSelectTract, variant 
     };
     return c[stateFips] ?? [-98, 39];
   }, [stateFips]);
+
+  const zoom = stateFips == null ? 3.5 : stateFips === "06" ? 5.5 : 6;
+  const hasTracts = Boolean(data?.features?.length);
 
   const layerPanel = (
     <div className="rounded-lg border border-slate-200 bg-white/95 p-3 shadow-md backdrop-blur-sm">
@@ -145,16 +151,19 @@ export function NeighborMap({ stateFips, data, mapStyle, onSelectTract, variant 
 
   const mapEl = (
     <Map
+      key={stateFips ?? "us"}
       style={{ width: "100%", height: "100%" }}
-      initialViewState={{ longitude: center[0], latitude: center[1], zoom: stateFips === "06" ? 5.5 : 6 }}
+      initialViewState={{ longitude: center[0], latitude: center[1], zoom }}
       mapStyle={styleUrl}
-      interactiveLayerIds={["tract-fill"]}
+      interactiveLayerIds={hasTracts ? ["tract-fill"] : []}
       onClick={onClick}
     >
-      <Source id="tracts" type="geojson" data={data}>
-        <Layer id="tract-fill" type="fill" paint={fillPaint as never} />
-        <Layer id="tract-outline" type="line" paint={linePaint as never} />
-      </Source>
+      {hasTracts && data ? (
+        <Source id="tracts" type="geojson" data={data}>
+          <Layer id="tract-fill" type="fill" paint={fillPaint as never} />
+          <Layer id="tract-outline" type="line" paint={linePaint as never} />
+        </Source>
+      ) : null}
     </Map>
   );
 
