@@ -33,7 +33,7 @@ NeighborHealth is a housing and health equity prioritization tool for nonprofits
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXT_PUBLIC_MAP_STYLE_URL` | Optional MapLibre style JSON URL (defaults to MapLibre demo tiles) |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | Optional MapLibre style JSON URL (defaults to OpenFreeMap Liberty; override if a CDN fails TLS on your network) |
 | `NEXT_PUBLIC_API_URL` | Backend base URL (default `http://localhost:8000`) |
 
 ## Local setup

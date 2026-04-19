@@ -55,24 +55,6 @@ export function MetricCard({ title, valueLabel, statePct, nationalPct, icon }: P
           </div>
         </div>
       </div>
-      <div className="mt-3 space-y-1">
-        <div className="flex gap-1">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={`s-${i}`}
-              className={`h-1.5 flex-1 rounded-sm ${i <= qState ? "bg-teal-500" : "bg-slate-200"}`}
-            />
-          ))}
-        </div>
-        <div className="flex gap-1">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={`n-${i}`}
-              className={`h-1.5 flex-1 rounded-sm ${i <= qNat ? "bg-orange-400" : "bg-slate-200"}`}
-            />
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

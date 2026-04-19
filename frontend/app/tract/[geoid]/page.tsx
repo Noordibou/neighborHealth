@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AISummaryPanel } from "@/components/AISummaryPanel";
 import { ScorecardActions } from "@/components/ScorecardActions";
 import { SiteFooter } from "@/components/SiteFooter";
+import { TractMapBackControl } from "@/components/TractMapBackControl";
 import { TractMetricGrid } from "@/components/TractMetricGrid";
 import { API_BASE, getTract, getTractSummary } from "@/lib/api";
 
@@ -41,11 +41,7 @@ export default async function TractPage({ params }: Props) {
   return (
     <div className="min-h-screen bg-[#f0f4f8]">
       <div className="mx-auto max-w-6xl px-4 py-8">
-        <p className="text-sm text-slate-500">
-          <Link href="/explore" className="font-medium text-teal-700 hover:underline">
-            ← Explore map
-          </Link>
-        </p>
+        <TractMapBackControl />
 
         <div className="mt-6 flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-start">

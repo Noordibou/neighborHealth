@@ -94,8 +94,55 @@ export type SearchResultRow = {
   composite_score: number | null;
 };
 
-export function searchTracts(q: string) {
-  return api<{ query: string; results: SearchResultRow[] }>(`/api/search?q=${encodeURIComponent(q)}`);
+export function searchTracts(q: string, opts?: { stateFips?: string; limit?: number }) {
+  const p = new URLSearchParams({ q: q.trim() });
+  if (opts?.stateFips) p.set("state_fips", opts.stateFips);
+  if (opts?.limit != null) p.set("limit", String(opts.limit));
+  return api<{ query: string; results: SearchResultRow[] }>(`/api/search?${p.toString()}`);
+}
+
+export type AddressSearchResponse = {
+  query: string;
+  matched_address: string | null;
+  longitude: number | null;
+  latitude: number | null;
+  results: SearchResultRow[];
+  census_tract_geoid: string | null;
+  resolver: "none" | "census_geographies" | "postgis_point";
+  message: string | null;
+};
+
+/** U.S. Census Bureau geocoder + local tract lookup (no Mapbox key). */
+export function searchFromAddress(address: string, stateFips?: string) {
+  const body: { address: string; state_fips?: string } = { address: address.trim() };
+  if (stateFips) body.state_fips = stateFips;
+  return api<AddressSearchResponse>("/api/search/from-address", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export type SearchSuggestItem = {
+  kind: "state" | "county" | "place";
+  label: string;
+  detail?: string | null;
+  query: string;
+  state_fips?: string | null;
+};
+
+export function searchSuggest(q: string) {
+  const t = q.trim();
+  if (t.length < 2) return Promise.resolve({ query: t, items: [] as SearchSuggestItem[] });
+  return api<{ query: string; items: SearchSuggestItem[] }>(
+    `/api/search/suggest?q=${encodeURIComponent(t)}`
+  );
+}
+
+export function postMapTractsByGeoids(geoids: string[]) {
+  return api<GeoJSON.FeatureCollection>("/api/map/tracts-by-geoids", {
+    method: "POST",
+    body: JSON.stringify({ geoids }),
+  });
 }
 
 export async function postPdfExport(geoid: string) {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -87,6 +87,48 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     results: list[SearchResult]
+
+
+class AddressSearchRequest(BaseModel):
+    address: str = Field(..., min_length=5, max_length=500)
+    state_fips: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="Optional: limit PostGIS containment fallback to this state.",
+    )
+
+
+class AddressSearchResponse(BaseModel):
+    query: str
+    matched_address: str | None = None
+    longitude: float | None = None
+    latitude: float | None = None
+    results: list[SearchResult]
+    census_tract_geoid: str | None = None
+    """Census Bureau tract GEOID when returned by the geocoder but not present in our database."""
+    resolver: Literal["none", "census_geographies", "postgis_point"] = "none"
+    message: str | None = None
+
+
+class SearchSuggestItem(BaseModel):
+    kind: Literal["state", "county", "place"]
+    label: str
+    detail: str | None = None
+    """Short hint (e.g. USPS state code, 'County', 'City / CDP')."""
+    query: str
+    """Text passed to search when this suggestion is chosen."""
+    state_fips: str | None = None
+    """When set, narrows tract search to this state."""
+
+
+class SearchSuggestResponse(BaseModel):
+    query: str
+    items: list[SearchSuggestItem]
+
+
+class GeoidsGeoJSONRequest(BaseModel):
+    geoids: list[str] = Field(..., min_length=1, max_length=100)
 
 
 class PDFExportRequest(BaseModel):

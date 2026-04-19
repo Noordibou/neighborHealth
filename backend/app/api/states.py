@@ -121,6 +121,9 @@ STATE_POSTAL_TO_FIPS: dict[str, str] = {
     "WY": "56",
 }
 
+# Census state FIPS → USPS abbreviation (for labels)
+STATE_FIPS_TO_POSTAL: dict[str, str] = {v: k for k, v in STATE_POSTAL_TO_FIPS.items()}
+
 
 @router.get("", response_model=list[StateOut])
 async def list_states(session: Annotated[AsyncSession, Depends(get_db)]) -> list[StateOut]:
