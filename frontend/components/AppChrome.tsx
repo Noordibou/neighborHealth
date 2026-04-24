@@ -9,5 +9,8 @@ export function AppChrome() {
   if (pathname === "/") {
     return <LandingHeader />;
   }
+  if (pathname?.startsWith("/explore")) {
+    return null;
+  }
   return <SiteHeader />;
 }

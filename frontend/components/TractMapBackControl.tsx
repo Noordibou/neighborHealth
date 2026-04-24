@@ -6,11 +6,11 @@ import { useRouter } from "next/navigation";
 export function TractMapBackControl() {
   const router = useRouter();
   return (
-    <p className="text-sm text-slate-500">
+    <p className="text-sm text-nh-brown-muted">
       <button
         type="button"
         onClick={() => router.back()}
-        className="font-medium text-teal-700 hover:underline"
+        className="font-semibold text-nh-terracotta hover:underline"
       >
         ← Back to map
       </button>

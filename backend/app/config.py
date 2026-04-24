@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Resolve backend/.env from this file so DATABASE_URL is consistent whether you start
+# uvicorn from `backend/`, the repo root, or Docker (file may be absent; use env vars).
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_ENV_PATH = _BACKEND_DIR / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_PATH),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     database_url: str = "postgresql+asyncpg://neighborhealth:neighborhealth@localhost:5432/neighborhealth"
     jwt_secret: str = "change-me-in-production"

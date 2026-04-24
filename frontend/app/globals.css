@@ -4,4 +4,7 @@
 
 :root {
   font-family: var(--font-inter), system-ui, sans-serif;
+  --nh-cream: #faf6ef;
+  --nh-terracotta: #c45c3e;
+  --nh-brown: #2c1810;
 }

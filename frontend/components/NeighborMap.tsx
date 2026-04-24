@@ -105,7 +105,7 @@ function numProp(p: Record<string, unknown>, k: string): number | null {
  * Fill color for tracts with no value for the active choropleth metric (distinct from the teal value ramp).
  * Referenced in the map legend and hover copy so users learn this convention.
  */
-const NO_DATA_CHOROPLETH_FILL = "#fed7aa";
+const NO_DATA_CHOROPLETH_FILL = "#f5e6d8";
 
 function hasChoroplethValueForProperty(p: Record<string, unknown> | undefined, key: string): boolean {
   if (!p || !Object.prototype.hasOwnProperty.call(p, key)) return false;
@@ -200,6 +200,14 @@ type Props = {
   fitBoundsToData?: boolean;
   /** Bump when a new search completes so zoom runs again even if the GeoJSON is unchanged. */
   zoomToResultsKey?: number;
+  /** When set, choropleth uses this GeoJSON property (e.g. nh_map_value) instead of the built-in metric picker. */
+  fillProperty?: string | null;
+  /** Legend / hover label for `fillProperty` mode. */
+  fillLabel?: string;
+  /** When false, hides the metric dropdown (parent drives `fillProperty`). */
+  showMetricControl?: boolean;
+  /** Strong outline for the active tract (GEOID string). */
+  selectedGeoid?: string | null;
 };
 
 function bboxFromGeoJSON(fc: GeoJSON.FeatureCollection): [[number, number], [number, number]] | null {
@@ -283,7 +291,7 @@ function choroplethDomain(
   range: { min: number; max: number } | null,
   key: string
 ): { lo: number; hi: number } {
-  const pctLike = key === "composite_score" || key.endsWith("_pct");
+  const pctLike = key === "composite_score" || key === "nh_map_value" || key.endsWith("_pct");
   if (!range) {
     return { lo: 0, hi: 100 };
   }
@@ -296,7 +304,7 @@ function choroplethDomain(
     max = mid + half;
     span = max - min;
   }
-  if (key === "composite_score" && span < 14) {
+  if ((key === "composite_score" || key === "nh_map_value") && span < 14) {
     const padMid = (14 - span) / 2;
     min -= padMid;
     max += padMid;
@@ -308,8 +316,8 @@ function choroplethDomain(
     span = max - min;
   }
   const pad = Math.max(span * 0.08, 0.75);
-  let lo = min - pad;
-  let hi = max + pad;
+  const lo = min - pad;
+  const hi = max + pad;
   if (pctLike) return clampPctDomain(lo, hi);
   return { lo, hi };
 }
@@ -319,9 +327,9 @@ function choroplethNoDataExpr(key: string): unknown[] {
   return ["any", ["!", ["has", key]], ["==", ["get", key], ["literal", null]]];
 }
 
-/** Five-stop ramp: very light → sky → teal → deep teal → near-black (strong luminance spread). */
+/** Five-stop ramp: cream → sand → terracotta → deep brick → near-black. */
 const CHORO_STOP_FRACS = [0, 0.22, 0.48, 0.74, 1] as const;
-const CHORO_COLORS = ["#d5f2ef", "#4ecfc2", "#178f83", "#0f766e", "#020617"] as const;
+const CHORO_COLORS = ["#faf6ef", "#e8c4b0", "#d4896e", "#b85c3a", "#2c1810"] as const;
 
 function buildChoroplethColorStops(lo: number, hi: number): (number | string)[] {
   const span = hi - lo;
@@ -340,34 +348,31 @@ export function NeighborMap({
   variant = "default",
   fitBoundsToData = false,
   zoomToResultsKey = 0,
+  fillProperty = null,
+  fillLabel = "Priority index",
+  showMetricControl = true,
+  selectedGeoid = null,
 }: Props) {
   const mapRef = useRef<MapRef>(null);
   const styleUrl = mapStyle ?? process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? DEFAULT_MAP_STYLE;
 
   const [colorBy, setColorBy] = useState<string>("composite_score");
-  const [visible, setVisible] = useState<Record<string, boolean>>(() => {
-    const o: Record<string, boolean> = {};
-    METRICS.forEach((m) => {
-      o[m.id] = true;
-    });
-    o.boundaries = true;
-    return o;
-  });
+  const effectiveKey = fillProperty ?? colorBy;
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const hoveredGeoidRef = useRef<string | null>(null);
   const hasTracts = Boolean(data?.features?.length);
 
-  const fillOpacity = visible[colorBy] === false ? 0 : 0.78;
-  const fillOpacityHover = fillOpacity > 0 ? Math.min(0.95, fillOpacity + 0.08) : 0.62;
+  const fillOpacity = 0.78;
+  const fillOpacityHover = Math.min(0.95, fillOpacity + 0.08);
 
   const choroplethRange = useMemo(
-    () => (data?.features?.length ? numericPropertyRange(data, colorBy) : null),
-    [data, colorBy]
+    () => (data?.features?.length ? numericPropertyRange(data, effectiveKey) : null),
+    [data, effectiveKey]
   );
 
   const colorDomain = useMemo(
-    () => choroplethDomain(choroplethRange, colorBy),
-    [choroplethRange, colorBy]
+    () => choroplethDomain(choroplethRange, effectiveKey),
+    [choroplethRange, effectiveKey]
   );
 
   const colorStops = useMemo(
@@ -376,7 +381,7 @@ export function NeighborMap({
   );
 
   const fillPaint = useMemo(() => {
-    const key = colorBy;
+    const key = effectiveKey;
     const noData = choroplethNoDataExpr(key);
     const ramp: unknown[] = [
       "interpolate",
@@ -385,41 +390,53 @@ export function NeighborMap({
       ...colorStops,
     ];
     const fillColor: unknown[] = ["case", noData, NO_DATA_CHOROPLETH_FILL, ramp];
-    const fillOpacityExpr: unknown =
-      fillOpacity === 0
-        ? ["literal", 0]
-        : [
-            "case",
-            ["boolean", ["feature-state", "hover"], false],
-            fillOpacityHover,
-            ["literal", fillOpacity],
-          ];
+    const fillOpacityExpr: unknown = [
+      "case",
+      ["boolean", ["feature-state", "hover"], false],
+      fillOpacityHover,
+      ["literal", fillOpacity],
+    ];
     return {
       "fill-color": fillColor,
       "fill-opacity": fillOpacityExpr,
     };
-  }, [colorBy, colorStops, fillOpacity, fillOpacityHover]);
+  }, [effectiveKey, colorStops, fillOpacity, fillOpacityHover]);
 
-  const lineWidthBase = visible.boundaries ? 0.45 : 0;
+  const lineWidthBase = 0.45;
   const linePaint = useMemo(() => {
-    const key = colorBy;
+    const key = effectiveKey;
     const noData = choroplethNoDataExpr(key);
+    const sel = selectedGeoid?.trim() ?? "";
+    const isSelected: unknown[] =
+      sel.length > 0 ? (["==", ["to-string", ["get", "geoid"]], sel] as unknown[]) : (["literal", false] as unknown[]);
+    /** Selected: terracotta ring. No-data tracts: soft peach. Default outlines: dark teal (distinct from selection). */
     return {
-      "line-color": ["case", noData, "#fb923c", "#042f2e"],
+      "line-color": [
+        "case",
+        isSelected,
+        "#c45c3e",
+        noData,
+        "#d6a889",
+        "#042f2e",
+      ],
       "line-width": [
         "case",
+        isSelected,
+        3.5,
         ["boolean", ["feature-state", "hover"], false],
         2.75,
         ["literal", lineWidthBase],
       ],
       "line-opacity": [
         "case",
+        isSelected,
+        1,
         ["boolean", ["feature-state", "hover"], false],
         0.95,
         ["case", noData, 0.38, 0.42],
       ],
     };
-  }, [lineWidthBase, colorBy]);
+  }, [lineWidthBase, effectiveKey, selectedGeoid]);
 
   const onClick = useCallback(
     (e: MapLayerMouseEvent) => {
@@ -462,14 +479,14 @@ export function NeighborMap({
             /* ignore */
           }
         }
-        setHoverInfo(propsToHover(props, colorBy));
+        setHoverInfo(propsToHover(props, effectiveKey));
       } else {
         canvas.style.cursor = "";
         clearHoverFeatureState(map);
         setHoverInfo(null);
       }
     },
-    [hasTracts, clearHoverFeatureState, colorBy]
+    [hasTracts, clearHoverFeatureState, effectiveKey]
   );
 
   const onMouseLeave = useCallback(
@@ -488,12 +505,13 @@ export function NeighborMap({
       "12": [-81.5, 27.5],
       "17": [-89, 40],
       "36": [-75, 43],
+      "42": [-77.6, 41.0],
       "48": [-99, 31],
     };
     return c[stateFips] ?? [-98, 39];
   }, [stateFips]);
 
-  const zoom = stateFips == null ? 3.5 : stateFips === "06" ? 5.5 : 6;
+  const zoom = stateFips == null ? 3.5 : stateFips === "06" ? 5.5 : stateFips === "42" ? 7 : 6;
 
   const boundsKey = useMemo(() => {
     if (!data?.features?.length) return "0";
@@ -583,8 +601,8 @@ export function NeighborMap({
       const hasMetrics = hoverHasShownMetrics(hoverInfo);
       return (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 w-[min(94vw,26rem)] -translate-x-1/2">
-          <div className="rounded-xl border border-slate-600/80 bg-[#0f2940]/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-200/90">Area under cursor</p>
+          <div className="rounded-xl border border-nh-brown/40 bg-nh-brown/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-100/90">Area under cursor</p>
             <p className="mt-1 line-clamp-2 text-sm font-semibold leading-snug">{headline}</p>
             {subline ? (
               <p className="mt-0.5 line-clamp-3 text-xs leading-snug text-slate-300">{subline}</p>
@@ -594,7 +612,7 @@ export function NeighborMap({
               <p className="mt-2 rounded-md border border-orange-400/55 bg-orange-900/75 px-2 py-1.5 text-[11px] leading-snug text-orange-100">
                 <span className="font-semibold text-orange-200">Map fill:</span> light{" "}
                 <strong className="text-orange-200">orange</strong> means no value for{" "}
-                <strong>{METRICS.find((m) => m.id === colorBy)?.label ?? "this metric"}</strong> on this tract (see
+                <strong>{METRICS.find((m) => m.id === effectiveKey)?.label ?? fillLabel}</strong> on this tract (see
                 legend on the map).
               </p>
             ) : null}
@@ -606,7 +624,7 @@ export function NeighborMap({
             ) : (
               <dl className="mt-2 grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-3 gap-y-1 border-t border-white/10 pt-2 text-xs">
                 <dt className="text-slate-400">Composite risk</dt>
-                <dd className="font-medium text-teal-100">
+                <dd className="font-medium text-nh-cream">
                   {hoverInfo.composite_score != null ? Math.round(hoverInfo.composite_score) : "—"}
                 </dd>
                 <dt className="text-slate-400">Rent burden</dt>
@@ -622,59 +640,43 @@ export function NeighborMap({
       );
     })() : null;
 
-  const layerPanel = (
-    <div className="rounded-lg border border-slate-200 bg-white/95 p-3 shadow-md backdrop-blur-sm">
-      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Choropleth</label>
-      <select
-        className="mt-1 w-full max-w-[200px] rounded border border-slate-300 px-2 py-1.5 text-xs"
-        value={colorBy}
-        onChange={(e) => setColorBy(e.target.value)}
-      >
-        {METRICS.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.label}
-          </option>
-        ))}
-      </select>
-      <div className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-xs">
-        {METRICS.slice(0, 5).map((m) => (
-          <label key={m.id} className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={visible[m.id] !== false}
-              onChange={(e) => setVisible((v) => ({ ...v, [m.id]: e.target.checked }))}
-            />
-            <span className="truncate">{m.label}</span>
-          </label>
-        ))}
-        <label className="flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-1">
-          <input
-            type="checkbox"
-            checked={visible.boundaries !== false}
-            onChange={(e) => setVisible((v) => ({ ...v, boundaries: e.target.checked }))}
-          />
-          <span>Boundaries</span>
-        </label>
+  const layerPanel =
+    showMetricControl && !fillProperty ? (
+      <div className="rounded-lg border border-nh-brown/10 bg-white/95 p-3 shadow-md backdrop-blur-sm">
+        <label className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">Map color</label>
+        <select
+          className="mt-1 w-full min-w-[11rem] rounded border border-nh-brown/15 px-2 py-1.5 text-xs text-nh-brown"
+          value={colorBy}
+          onChange={(e) => setColorBy(e.target.value)}
+        >
+          {METRICS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-[10px] leading-snug text-nh-brown-muted">
+          One metric at a time. Use the legend for the scale and how missing data is shown.
+        </p>
       </div>
-    </div>
-  );
+    ) : null;
 
-  const legendMetricLabel = METRICS.find((m) => m.id === colorBy)?.label ?? "Choropleth";
+  const legendMetricLabel = fillProperty ? fillLabel : METRICS.find((m) => m.id === effectiveKey)?.label ?? "Choropleth";
   const legendScaleHint =
     choroplethRange != null
-      ? `Teal ramp spans ~${Math.round(colorDomain.lo)}–${Math.round(colorDomain.hi)} on tracts shown here so similar values read as different shades.`
+      ? `Scale spans ~${Math.round(colorDomain.lo)}–${Math.round(colorDomain.hi)} on tracts shown here so similar values read as different shades.`
       : "No numeric values found for this metric on the current layer.";
 
   const legend = (
-    <div className="rounded-lg border border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{legendMetricLabel}</p>
+    <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">{legendMetricLabel}</p>
       <div
         className="mt-2 h-3 w-36 rounded-full shadow-inner ring-1 ring-slate-200/80"
         style={{
           background: `linear-gradient(to right, ${CHORO_COLORS.join(", ")})`,
         }}
       />
-      <div className="mt-1 flex justify-between text-[10px] text-slate-500">
+      <div className="mt-1 flex justify-between text-[10px] text-nh-brown-muted">
         <span>Lower</span>
         <span>Higher</span>
       </div>
@@ -688,7 +690,7 @@ export function NeighborMap({
          No data available for this metric
         </p>
       </div>
-      <p className="mt-1.5 max-w-[11rem] text-[9px] leading-snug text-slate-500">{legendScaleHint}</p>
+      <p className="mt-1.5 max-w-[11rem] text-[9px] leading-snug text-nh-brown-muted">{legendScaleHint}</p>
     </div>
   );
 
@@ -716,10 +718,12 @@ export function NeighborMap({
   if (variant === "explore") {
     /* Explicit height: parent `h-full` + `lg:min-h-0` often collapses to 0 on flex layouts, which hides the map canvas. */
     return (
-      <div className="relative isolate h-[560px] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-inner sm:h-[64vh] lg:h-[calc(100vh-5rem)]">
+      <div className="relative isolate h-[560px] w-full overflow-hidden rounded-xl border border-nh-brown/10 bg-nh-sand/40 shadow-inner sm:h-[64vh] lg:h-[calc(100vh-8.5rem)]">
+        {layerPanel ? (
         <div className="pointer-events-none absolute left-3 top-3 z-10 max-h-[70vh] overflow-y-auto">
           <div className="pointer-events-auto">{layerPanel}</div>
         </div>
+      ) : null}
         <div className="pointer-events-none absolute right-3 top-3 z-10">
           <div className="pointer-events-auto">{legend}</div>
         </div>
@@ -733,7 +737,7 @@ export function NeighborMap({
     <div className="flex h-[min(720px,80vh)] flex-col gap-3 lg:flex-row">
       <div className="flex w-full flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm lg:max-w-xs">
         <div>
-          <label className="text-xs font-medium uppercase text-slate-500">Choropleth</label>
+          <label className="text-xs font-medium uppercase text-slate-500">Map color</label>
           <select
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
             value={colorBy}
@@ -747,29 +751,8 @@ export function NeighborMap({
           </select>
         </div>
         <p className="text-xs text-slate-500">
-          Choose which field drives the color scale. Toggles hide the fill when that metric is selected for
-          choropleth.
+          Choose a single metric to color tracts. Tract outlines stay on; the color ramp matches the selected field.
         </p>
-        <div className="grid grid-cols-1 gap-1 text-sm">
-          {METRICS.map((m) => (
-            <label key={m.id} className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={visible[m.id] !== false}
-                onChange={(e) => setVisible((v) => ({ ...v, [m.id]: e.target.checked }))}
-              />
-              <span>{m.label}</span>
-            </label>
-          ))}
-          <label className="flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-2">
-            <input
-              type="checkbox"
-              checked={visible.boundaries !== false}
-              onChange={(e) => setVisible((v) => ({ ...v, boundaries: e.target.checked }))}
-            />
-            <span>Boundaries</span>
-          </label>
-        </div>
       </div>
       <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-lg border border-slate-200 shadow-inner">
         {hoverLegend}

@@ -1,29 +1,46 @@
 "use client";
 
 import Link from "next/link";
+import { BrandWordmark } from "@/components/BrandMark";
 
-/** Minimal header for marketing home: logo + About + Sign In (no app nav). */
+const nav = [
+  { href: "/explore", label: "Map Explorer" },
+  { href: "/#methodology", label: "Methodology" },
+  { href: "/#sources", label: "Data sources" },
+  { href: "/about", label: "About" },
+];
+
 export function LandingHeader() {
   return (
-    <header className="border-b border-slate-200/80 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-3.5">
-        <Link href="/" className="flex items-center gap-2 text-lg font-semibold tracking-tight text-[#0f2940]">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-600 text-white" aria-hidden>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-          </span>
-          NeighborHealth
-        </Link>
-        <nav className="flex items-center gap-6 text-sm font-medium text-slate-600">
-          <Link href="/about" className="hover:text-teal-800">
-            About
-          </Link>
-          <Link href="#" className="text-slate-500 hover:text-slate-800" onClick={(e) => e.preventDefault()}>
+    <header className="sticky top-0 z-50 border-b border-nh-brown/10 bg-nh-cream/95 backdrop-blur-md">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3.5">
+        <BrandWordmark />
+        <nav className="hidden items-center gap-1 md:flex">
+          {nav.map(({ href, label }) => (
+            <Link
+              key={href}
+              href={href}
+              className="rounded-md px-3 py-2 text-sm font-medium text-nh-brown-muted transition hover:bg-white/80 hover:text-nh-brown"
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="#"
+            className="hidden rounded-lg border border-nh-brown/20 px-3 py-2 text-sm font-medium text-nh-brown sm:inline-block"
+            onClick={(e) => e.preventDefault()}
+          >
             Sign In
           </Link>
-        </nav>
+          <Link
+            href="/explore"
+            className="rounded-lg bg-nh-brown px-3 py-2 text-sm font-semibold text-nh-cream shadow-sm transition hover:bg-nh-brown/90"
+          >
+            Open explorer →
+          </Link>
+        </div>
       </div>
     </header>
   );

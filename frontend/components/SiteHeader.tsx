@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BrandWordmark } from "@/components/BrandMark";
 
 const nav = [
-  { href: "/explore", label: "Explore" },
-  { href: "/compare", label: "Compare" },
+  { href: "/explore", label: "Map Explorer" },
+  { href: "/#methodology", label: "Methodology" },
+  { href: "/#sources", label: "Data sources" },
   { href: "/about", label: "About" },
 ];
 
@@ -13,26 +15,18 @@ export function SiteHeader() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-3.5">
-        <Link href="/" className="flex items-center gap-2 text-lg font-semibold tracking-tight text-[#0f2940]">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-600 text-white" aria-hidden>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-          </span>
-          NeighborHealth
-        </Link>
-        <nav className="flex items-center gap-1 text-sm font-medium text-slate-600">
+    <header className="sticky top-0 z-50 border-b border-nh-brown/10 bg-nh-cream/95 backdrop-blur-md">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3.5">
+        <BrandWordmark />
+        <nav className="hidden items-center gap-1 lg:flex">
           {nav.map(({ href, label }) => {
-            const active = pathname === href;
+            const active = pathname === href.split("#")[0] && href.startsWith("/explore");
             return (
               <Link
                 key={href}
                 href={href}
-                className={`rounded-md px-3 py-2 transition-colors hover:bg-teal-50 hover:text-teal-900 ${
-                  active ? "bg-teal-100/90 text-teal-900" : ""
+                className={`rounded-md px-3 py-2 text-sm font-medium transition ${
+                  active ? "bg-white text-nh-brown shadow-sm" : "text-nh-brown-muted hover:bg-white/70 hover:text-nh-brown"
                 }`}
               >
                 {label}
@@ -40,9 +34,29 @@ export function SiteHeader() {
             );
           })}
         </nav>
-        <Link href="#" className="text-sm font-medium text-slate-500 hover:text-slate-800" onClick={(e) => e.preventDefault()}>
-          Sign In
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/compare"
+            className={`hidden rounded-md px-2 py-2 text-sm font-medium sm:inline-block ${
+              pathname === "/compare" ? "text-nh-terracotta" : "text-nh-brown-muted hover:text-nh-brown"
+            }`}
+          >
+            Compare
+          </Link>
+          <Link
+            href="#"
+            className="hidden rounded-lg border border-nh-brown/20 px-3 py-2 text-sm font-medium text-nh-brown md:inline-block"
+            onClick={(e) => e.preventDefault()}
+          >
+            Sign In
+          </Link>
+          <Link
+            href="/explore"
+            className="rounded-lg bg-nh-brown px-3 py-2 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
+          >
+            Open explorer →
+          </Link>
+        </div>
       </div>
     </header>
   );

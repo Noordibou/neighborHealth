@@ -3,47 +3,89 @@ import { SiteFooter } from "@/components/SiteFooter";
 
 export default function LandingPage() {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-white">
-      <section className="relative overflow-hidden border-b border-slate-100">
-        <div
-          className="pointer-events-none absolute inset-0 opacity-[0.12]"
-          style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 600'%3E%3Cpath fill='%230d9488' d='M120 180 L200 140 L280 160 L360 120 L440 150 L520 130 L600 170 L680 150 L760 190 L840 160 L900 200 L900 420 L100 420 Z'/%3E%3C/svg%3E")`,
-            backgroundSize: "cover",
-            backgroundPosition: "center 30%",
-          }}
-        />
-        <div className="relative mx-auto max-w-4xl px-4 pb-20 pt-16 text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-[#0f2940] md:text-5xl">
-            Find where housing stress and health risk overlap.
-          </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-slate-600">
-            NeighborHealth helps nonprofit planners and housing advocates explore the intersection of housing
-            affordability and community health outcomes.
-          </p>
-          <form action="/explore" method="get" className="mx-auto mt-10 max-w-2xl">
-            <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-md">
-              <svg className="h-5 w-5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                name="q"
-                type="search"
-                placeholder="Search by city, county, or census tract"
-                className="min-w-0 flex-1 border-0 bg-transparent text-[#0f2940] placeholder:text-slate-400 focus:outline-none focus:ring-0"
+    <div className="flex min-h-screen flex-col bg-nh-cream text-nh-brown">
+      <section className="border-b border-nh-brown/10">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 py-14 lg:grid-cols-2 lg:items-center lg:py-20">
+          <div>
+            <h1 className="font-display text-4xl font-semibold leading-tight tracking-tight text-nh-brown md:text-5xl">
+              Find where housing stress and{" "}
+              <span className="text-nh-terracotta italic">health risk overlap.</span>
+            </h1>
+            <p className="mt-5 max-w-xl text-lg leading-relaxed text-nh-brown-muted">
+              NeighborHealth combines HUD housing indicators and CDC PLACES health estimates into a composite
+              prioritization index—so outreach teams can see where to focus first.
+            </p>
+            <form action="/explore" method="get" className="mt-8">
+              <div className="flex flex-col gap-2 rounded-2xl border border-nh-brown/10 bg-white p-1.5 shadow-sm sm:flex-row sm:items-center">
+                <div className="relative flex min-w-0 flex-1 items-center pl-3">
+                  <svg className="h-5 w-5 shrink-0 text-nh-brown-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input
+                    name="q"
+                    type="search"
+                    placeholder="Search by city, county, or census tract…"
+                    className="min-w-0 flex-1 border-0 bg-transparent py-3 pl-2 pr-2 text-nh-brown placeholder:text-nh-brown-muted/70 focus:outline-none focus:ring-0"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="shrink-0 rounded-xl bg-nh-terracotta px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-nh-terracotta-dark"
+                >
+                  Explore →
+                </button>
+              </div>
+            </form>
+            <p className="mt-4 flex flex-wrap items-center gap-2 text-sm text-nh-brown-muted">
+              <span className="font-semibold uppercase tracking-wide text-nh-brown/50">Try:</span>
+              {["Philadelphia, PA", "19134", "Tract 42101018800", "Kensington"].map((t) => (
+                <Link
+                  key={t}
+                  href={`/explore?q=${encodeURIComponent(t)}`}
+                  className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown transition hover:border-nh-terracotta hover:text-nh-terracotta"
+                >
+                  {t}
+                </Link>
+              ))}
+            </p>
+            <dl className="mt-10 grid grid-cols-2 gap-6 sm:grid-cols-4">
+              {[
+                { k: "Tracts analyzed", v: "73,056" },
+                { k: "Indicators", v: "18" },
+                { k: "Last refresh", v: "Apr 2024" },
+                { k: "Used by", v: "210 orgs" },
+              ].map((row) => (
+                <div key={row.k}>
+                  <dt className="text-[10px] font-bold uppercase tracking-wider text-nh-brown-muted">{row.k}</dt>
+                  <dd className="mt-1 font-display text-2xl font-semibold text-nh-brown">{row.v}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <div className="relative">
+            <div className="overflow-hidden rounded-3xl border border-nh-brown/10 bg-white shadow-[0_24px_60px_rgba(44,24,16,0.12)]">
+              <div
+                className="relative aspect-[4/3] w-full bg-gradient-to-br from-nh-cream via-nh-sand to-nh-terracotta/25"
+                style={{
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 300'%3E%3Cpath fill='%23c45c3e22' d='M40 200 L120 80 L200 140 L280 60 L360 120 L360 260 L40 260 Z'/%3E%3Cpath fill='%23b85c3a33' d='M60 220 L160 100 L240 160 L320 90 L340 200 L340 260 L60 260 Z'/%3E%3C/svg%3E")`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+                role="img"
+                aria-label="Decorative map preview with shaded regions"
               />
-              <button type="submit" className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">
-                Search
-              </button>
+              <div className="absolute left-4 top-4 rounded-full bg-white/95 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-nh-brown shadow">
+                Live · Philadelphia County, PA
+              </div>
+              <div className="absolute bottom-4 left-4 rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 text-[10px] shadow backdrop-blur-sm">
+                <p className="font-semibold uppercase tracking-wide text-nh-brown-muted">Priority index</p>
+                <p className="mt-1 font-mono text-[11px] text-nh-brown">0 — 100 scale</p>
+              </div>
             </div>
-          </form>
-          <p className="mt-4 text-sm text-slate-500">
-            Or go straight to the{" "}
-            <Link href="/explore" className="font-medium text-teal-700 hover:underline">
-              interactive map
-            </Link>
-            .
-          </p>
+            <p className="mt-2 text-center text-[11px] text-nh-brown-muted">
+              Illustrative preview — open the explorer for live data in your states.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -52,96 +94,72 @@ export default function LandingPage() {
           {[
             {
               title: "Identify high-risk neighborhoods",
-              body: "See where housing cost burden, lack of insurance, and chronic disease converge at the census tract level.",
-              icon: "pin",
+              body: "Rank census tracts with a transparent composite of rent burden, insurance coverage, chronic conditions, overcrowding, and asthma burden.",
+              href: "/explore",
             },
             {
               title: "Compare areas side by side",
-              body: "Select multiple tracts and compare health and housing indicators with interactive charts and tables.",
-              icon: "chart",
+              body: "Collect up to four tracts in the compare tray and open a side-by-side profile with charts and raw indicators.",
+              href: "/compare",
             },
             {
               title: "Export reports for stakeholders",
-              body: "Download ready-to-share PDF scorecards and data exports for grant applications and policy briefs.",
-              icon: "doc",
+              body: "Download tract PDF scorecards and CSV exports for grants and policy memos—with citations to public sources.",
+              href: "/about",
             },
           ].map((card) => (
-            <div key={card.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-50 text-teal-700">
-                {card.icon === "pin" && (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                    <circle cx="12" cy="10" r="3" />
-                  </svg>
-                )}
-                {card.icon === "chart" && (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M18 20V10M12 20V4M6 20v-6" />
-                  </svg>
-                )}
-                {card.icon === "doc" && (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <path d="M12 18v-6M9 15h6" />
-                  </svg>
-                )}
-              </div>
-              <h2 className="mt-4 text-lg font-semibold text-[#0f2940]">{card.title}</h2>
-              <p className="mt-2 text-sm leading-relaxed text-slate-600">{card.body}</p>
+            <div
+              key={card.title}
+              className="flex flex-col rounded-2xl border border-nh-brown/10 bg-white p-6 shadow-sm transition hover:shadow-md"
+            >
+              <h2 className="text-lg font-semibold text-nh-brown">{card.title}</h2>
+              <p className="mt-3 flex-1 text-sm leading-relaxed text-nh-brown-muted">{card.body}</p>
+              <Link href={card.href} className="mt-5 inline-flex text-sm font-semibold text-nh-terracotta hover:underline">
+                Learn more →
+              </Link>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="border-t border-slate-100 bg-slate-50/80 py-16">
-        <div className="mx-auto max-w-5xl px-4">
-          <h2 className="text-center text-2xl font-bold text-[#0f2940]">How it works</h2>
-          <div className="mt-10 grid gap-10 md:grid-cols-3">
+      <section id="methodology" className="border-t border-nh-brown/10 bg-white/60 py-16">
+        <div className="mx-auto max-w-7xl px-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-nh-terracotta">Methodology</p>
+          <h2 className="mt-2 font-display text-3xl font-semibold text-nh-brown">How the index is built.</h2>
+          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-nh-brown-muted">
+            Each tract receives a 0–100 score from publicly available housing and health indicators. We percentile-rank
+            metrics within the comparison cohort, apply domain-informed weights, and surface the blend on the map and in
+            exports.
+          </p>
+          <div className="mt-12 grid gap-10 md:grid-cols-3">
             {[
               {
-                step: "1",
-                title: "Search",
-                body: "Enter a city, county, or census tract to find your area of interest.",
-                icon: (
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                ),
+                n: "01",
+                t: "Pull source data",
+                d: "Ingest HUD CHAS / ACS housing fields and CDC PLACES tract estimates aligned by GEOID and vintage.",
               },
               {
-                step: "2",
-                title: "Filter & explore",
-                body: "Use filters to narrow results by rent burden, uninsured rate, and more.",
-                icon: (
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18M7 12h10M10 20h4" />
-                  </svg>
-                ),
+                n: "02",
+                t: "Normalize & weight",
+                d: "Percentile-transform indicators, handle missing values explicitly, and combine with adjustable weights in the explorer.",
               },
               {
-                step: "3",
-                title: "Report & act",
-                body: "Download scorecards and share data-driven insights with your team.",
-                icon: (
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-                  </svg>
-                ),
+                n: "03",
+                t: "Surface priorities",
+                d: "Choropleth shading, ranked lists, tract profiles, and compare mode translate scores into action-ready views.",
               },
             ].map((s) => (
-              <div key={s.step} className="text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-teal-100 text-teal-800">{s.icon}</div>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-teal-700">Step {s.step}</p>
-                <h3 className="mt-1 font-semibold text-[#0f2940]">{s.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{s.body}</p>
+              <div key={s.n}>
+                <p className="font-display text-3xl font-light text-nh-terracotta/80">{s.n}</p>
+                <h3 className="mt-2 font-semibold text-nh-brown">{s.t}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-nh-brown-muted">{s.d}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <SiteFooter />
+      <SiteFooter variant="dark" />
     </div>
   );
 }

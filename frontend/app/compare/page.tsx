@@ -2,22 +2,30 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
   PolarAngleAxis,
   PolarGrid,
   Radar,
   RadarChart,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getCompare, type IndicatorRow } from "@/lib/api";
+import { buildCompareInsights, compareSeriesToLineChartData } from "@/lib/compareInsights";
 import { METRIC_KEYS } from "@/lib/riskScore";
 import { METRIC_LABELS, formatMetricValue } from "@/lib/metricDisplay";
 import type { MetricKey } from "@/lib/riskScore";
 
-const RADAR_COLORS = ["#15803d", "#ea580c", "#2563eb", "#7c3aed"];
+const LINE_COLORS = ["#c45c3e", "#2c6e49", "#b8860b", "#2563eb"];
+const RADAR_COLORS = LINE_COLORS;
 
 const LABELS: Record<string, string> = Object.fromEntries(
   METRIC_KEYS.map((k) => [k, METRIC_LABELS[k as MetricKey]])
@@ -34,16 +42,16 @@ function rawFor(geoid: string, metric: string, raw: Record<string, IndicatorRow[
   return raw?.[geoid]?.find((i) => i.metric_name === metric);
 }
 
-function cellTone(metric: string, value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "bg-slate-50 text-slate-700";
-  if (metric === "heat_index") {
-    if (value >= 75) return "bg-red-100 text-red-900";
-    if (value >= 55) return "bg-amber-100 text-amber-900";
-    return "bg-emerald-100 text-emerald-900";
-  }
-  if (value >= 45) return "bg-red-100 text-red-900";
-  if (value >= 25) return "bg-amber-100 text-amber-900";
-  return "bg-emerald-100 text-emerald-900";
+function barWidthPct(metric: string, value: number | null | undefined, geoids: string[], raw: Record<string, IndicatorRow[]>): number {
+  if (value == null || Number.isNaN(value)) return 0;
+  const vals = geoids
+    .map((g) => rawFor(g, metric, raw)?.value)
+    .filter((x): x is number => typeof x === "number" && !Number.isNaN(x));
+  if (!vals.length) return 50;
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  if (hi - lo < 1e-9) return 50;
+  return Math.max(8, Math.min(100, ((value - lo) / (hi - lo)) * 100));
 }
 
 function CompareInner() {
@@ -83,6 +91,35 @@ function CompareInner() {
     });
   }, [data]);
 
+  const lineData = useMemo(() => (data ? compareSeriesToLineChartData(data.series as Record<string, number | string>[]) : []), [data]);
+
+  const insights = useMemo(
+    () => (data ? buildCompareInsights(data.series as Record<string, number | string>[]) : []),
+    [data]
+  );
+
+  const downloadCsv = useCallback(() => {
+    if (!data) return;
+    const header = ["metric", ...data.series.map((s) => String(s.geoid))];
+    const lines = [header.join(",")];
+    for (const k of METRIC_KEYS) {
+      const row: string[] = [k];
+      for (const s of data.series) {
+        const r = rawFor(String(s.geoid), k, data.raw_indicators);
+        const cell = r?.value != null ? String(r.value) : "";
+        row.push(cell);
+      }
+      lines.push(row.join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `neighborhealth-compare-${data.geoids.join("-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [data]);
+
   function setGeoids(next: string[]) {
     const q = next.join(",");
     router.push(q ? `/compare?geoids=${encodeURIComponent(q)}` : `/compare`);
@@ -101,51 +138,79 @@ function CompareInner() {
 
   if (geoids.length === 0) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-12">
-        <h1 className="text-2xl font-bold text-[#0f2940]">Compare tracts</h1>
-        <p className="mt-2 text-slate-600">
-          Add one or more census tract GEOIDs to your comparison. You need at least two tracts to load the chart and
-          table.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <input
-            className="min-w-[200px] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            placeholder="11-digit GEOID"
-            value={addInput}
-            onChange={(e) => setAddInput(e.target.value)}
-          />
-          <button
-            type="button"
-            onClick={() => addGeoid()}
-            className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
-          >
-            Add tract
-          </button>
+      <div className="min-h-screen bg-nh-cream">
+        <div className="mx-auto max-w-2xl px-4 py-14">
+          <h1 className="font-display text-3xl font-semibold text-nh-brown">Compare tracts</h1>
+          <p className="mt-3 text-nh-brown-muted">
+            Enter census tract GEOIDs (up to four). Add at least two to load charts, the indicator table, and CSV
+            export.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-2">
+            <input
+              className="min-w-[200px] flex-1 rounded-xl border border-nh-brown/15 bg-white px-3 py-2.5 text-sm text-nh-brown"
+              placeholder="11-digit GEOID"
+              value={addInput}
+              onChange={(e) => setAddInput(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => addGeoid()}
+              className="rounded-xl bg-nh-brown px-5 py-2.5 text-sm font-semibold text-nh-cream hover:bg-nh-brown/90"
+            >
+              Add tract
+            </button>
+          </div>
+          <p className="mt-8">
+            <Link href="/explore" className="text-sm font-semibold text-nh-terracotta hover:underline">
+              ← Back to map
+            </Link>
+          </p>
         </div>
-        <p className="mt-6">
-          <Link href="/explore" className="font-medium text-teal-700 hover:underline">
-            ← Explore map
-          </Link>
-        </p>
         <SiteFooter />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-nh-cream text-nh-brown">
       <div className="mx-auto max-w-6xl px-4 py-8">
-        <Link href="/explore" className="text-sm font-medium text-teal-700 hover:underline">
-          ← Explore map
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link href="/explore" className="text-sm font-semibold text-nh-terracotta hover:underline">
+            ← Back to map
+          </Link>
+          {data && geoids.length >= 2 && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={downloadCsv}
+                className="rounded-full border border-nh-brown/20 bg-white px-4 py-2 text-sm font-semibold text-nh-brown hover:bg-nh-cream"
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="rounded-full bg-nh-brown px-4 py-2 text-sm font-semibold text-nh-cream hover:bg-nh-brown/90"
+              >
+                Print / PDF
+              </button>
+            </div>
+          )}
+        </div>
 
-        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-2xl font-bold text-[#0f2940]">
-            Comparing {geoids.length} {geoids.length === 1 ? "area" : "areas"}
-          </h1>
+        <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-nh-terracotta">Compare</p>
+            <h1 className="mt-1 font-display text-3xl font-semibold text-nh-brown md:text-4xl">
+              {geoids.length} tracts side by side
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-nh-brown-muted">
+              Composite sub-scores (0–100) and raw indicators. Bars in each cell are scaled to this comparison set.
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <input
-              className="min-w-[160px] rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              className="min-w-[140px] rounded-full border border-nh-brown/15 bg-white px-3 py-2 text-sm"
               placeholder="Add GEOID"
               value={addInput}
               onChange={(e) => setAddInput(e.target.value)}
@@ -155,105 +220,147 @@ function CompareInner() {
               type="button"
               onClick={addGeoid}
               disabled={geoids.length >= 4}
-              className="rounded-xl border-2 border-dashed border-teal-400 bg-teal-50/50 px-4 py-2 text-sm font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50"
+              className="rounded-full border border-dashed border-nh-terracotta bg-white px-4 py-2 text-sm font-semibold text-nh-terracotta hover:bg-nh-cream disabled:opacity-40"
             >
-              + Add another
+              + Add
             </button>
           </div>
         </div>
 
         {geoids.length === 1 && (
-          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Add a second tract (use the field above) to see the radar chart and side-by-side metrics.
+          <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            Add a second GEOID to load the comparison.
           </p>
         )}
 
-        {err && geoids.length >= 2 && <p className="mt-4 text-sm text-red-600">{err}</p>}
+        {err && geoids.length >= 2 && <p className="mt-6 text-sm text-red-600">{err}</p>}
 
         {data && geoids.length >= 2 && (
           <>
-            <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50/50 p-4 shadow-sm">
-              <div className="h-[420px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart data={chartData}>
-                    <PolarGrid />
-                    <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    {data.series.map((s, i) => (
-                      <Radar
-                        key={String(s.geoid)}
-                        name={String(s.label ?? s.geoid)}
-                        dataKey={String(s.geoid)}
-                        stroke={RADAR_COLORS[i % RADAR_COLORS.length]}
-                        fill={RADAR_COLORS[i % RADAR_COLORS.length]}
-                        fillOpacity={0.12}
-                      />
-                    ))}
-                  </RadarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="mt-4 flex flex-wrap justify-center gap-6 text-sm">
-                {data.series.map((s, i) => (
-                  <div key={String(s.geoid)} className="flex items-center gap-2">
-                    <span
-                      className="h-3 w-3 rounded-sm"
-                      style={{ backgroundColor: RADAR_COLORS[i % RADAR_COLORS.length] }}
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {data.series.map((s, i) => {
+                const badge = compositeBadge(s as Record<string, number | string>);
+                const flag = badge != null && badge >= 55 ? "Priority" : "Stable";
+                return (
+                  <div key={String(s.geoid)} className="relative rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-sm">
+                    <button
+                      type="button"
+                      className="absolute right-3 top-3 text-nh-brown-muted hover:text-red-600"
+                      aria-label={`Remove ${s.geoid}`}
+                      onClick={() => removeGeoid(String(s.geoid))}
+                    >
+                      ×
+                    </button>
+                    <p className="pr-8 font-semibold text-nh-brown">{String(s.label ?? s.geoid)}</p>
+                    <p className="text-xs text-nh-brown-muted">{String(s.geoid)}</p>
+                    <div className="mt-4 flex items-end justify-between">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase text-nh-brown-muted">Composite</p>
+                        <p className="font-display text-4xl font-bold text-nh-terracotta">{badge ?? "—"}</p>
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          flag === "Priority" ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-900"
+                        }`}
+                      >
+                        {flag}
+                      </span>
+                    </div>
+                    <div
+                      className="mt-4 h-12 rounded-lg bg-nh-cream"
+                      style={{
+                        backgroundImage: `linear-gradient(90deg, ${LINE_COLORS[i % LINE_COLORS.length]}44 0%, ${LINE_COLORS[i % LINE_COLORS.length]} 100%)`,
+                      }}
+                      title="Relative profile shape (decorative)"
                     />
-                    <span className="text-slate-700">
-                      {String(s.label ?? s.geoid)} — {String(s.geoid)}
-                    </span>
                   </div>
-                ))}
+                );
+              })}
+            </div>
+
+            <div className="mt-10 grid gap-8 lg:grid-cols-2">
+              <div className="rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-sm">
+                <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Radar profile</p>
+                <div className="h-[360px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart data={chartData}>
+                      <PolarGrid stroke="#e8dfd4" />
+                      <PolarAngleAxis dataKey="metric" tick={{ fontSize: 9, fill: "#5c4033" }} />
+                      <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e8dfd4" }} />
+                      {data.series.map((s, i) => (
+                        <Radar
+                          key={String(s.geoid)}
+                          name={String(s.label ?? s.geoid)}
+                          dataKey={String(s.geoid)}
+                          stroke={RADAR_COLORS[i % RADAR_COLORS.length]}
+                          fill={RADAR_COLORS[i % RADAR_COLORS.length]}
+                          fillOpacity={0.15}
+                        />
+                      ))}
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-sm">
+                <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Profile shape</p>
+                <p className="text-[11px] text-nh-brown-muted">Each line = one tract; normalized component scores 0–100.</p>
+                <div className="mt-2 h-[360px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={lineData} margin={{ top: 8, right: 8, left: 0, bottom: 48 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e8dfd4" />
+                      <XAxis dataKey="metric" tick={{ fontSize: 9, fill: "#5c4033" }} interval={0} angle={-20} textAnchor="end" height={70} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#5c4033" }} width={32} />
+                      <Tooltip contentStyle={{ borderRadius: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      {data.series.map((s, i) => (
+                        <Line
+                          key={String(s.geoid)}
+                          type="monotone"
+                          dataKey={String(s.geoid)}
+                          name={String(s.label ?? s.geoid)}
+                          stroke={LINE_COLORS[i % LINE_COLORS.length]}
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
 
-            <div className="mt-10 overflow-x-auto rounded-2xl border border-slate-200 shadow-sm">
+            <div className="mt-10 overflow-x-auto rounded-2xl border border-nh-brown/10 bg-white shadow-sm">
               <table className="min-w-full border-collapse text-left text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50">
-                    <th className="px-4 py-3 font-semibold text-slate-700">Indicator</th>
-                    {data.series.map((s) => {
-                      const badge = compositeBadge(s as Record<string, number | string>);
-                      return (
-                        <th key={String(s.geoid)} className="min-w-[180px] px-4 py-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                {badge != null && (
-                                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-red-50 text-sm font-bold text-red-500">
-                                    {badge}
-                                  </span>
-                                )}
-                                <div>
-                                  <div className="font-semibold text-[#0f2940]">{String(s.label ?? s.geoid)}</div>
-                                  <div className="text-xs text-slate-500">{String(s.geoid)}</div>
-                                </div>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="text-slate-400 hover:text-red-600"
-                              aria-label={`Remove ${s.geoid}`}
-                              onClick={() => removeGeoid(String(s.geoid))}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        </th>
-                      );
-                    })}
+                  <tr className="border-b border-nh-brown/10 bg-nh-cream/80">
+                    <th className="px-4 py-3 font-semibold text-nh-brown">Indicator</th>
+                    {data.series.map((s) => (
+                      <th key={String(s.geoid)} className="min-w-[200px] px-4 py-3">
+                        <div className="font-semibold text-nh-brown">{String(s.label ?? s.geoid)}</div>
+                        <div className="text-xs font-normal text-nh-brown-muted">{String(s.geoid)}</div>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {METRIC_KEYS.map((k) => (
-                    <tr key={k} className="border-b border-slate-100">
-                      <td className="px-4 py-3 font-medium text-slate-700">{LABELS[k] ?? k}</td>
+                    <tr key={k} className="border-b border-nh-brown/5">
+                      <td className="px-4 py-3 font-medium text-nh-brown-muted">{LABELS[k] ?? k}</td>
                       {data.series.map((s) => {
                         const row = rawFor(String(s.geoid), k, data.raw_indicators);
                         const v = row?.value ?? null;
+                        const w = barWidthPct(k, v, data.series.map((x) => String(x.geoid)), data.raw_indicators);
                         return (
-                          <td key={`${s.geoid}-${k}`} className={`px-4 py-3 font-medium ${cellTone(k, v)}`}>
-                            {v != null ? formatMetricValue(k, v) : "—"}
+                          <td key={`${s.geoid}-${k}`} className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <span className="font-semibold text-nh-brown">{v != null ? formatMetricValue(k, v) : "—"}</span>
+                              <div className="h-2 w-full overflow-hidden rounded-full bg-nh-sand">
+                                <div
+                                  className="h-full rounded-full bg-nh-terracotta/90 transition-all"
+                                  style={{ width: `${w}%` }}
+                                />
+                              </div>
+                            </div>
                           </td>
                         );
                       })}
@@ -262,9 +369,18 @@ function CompareInner() {
                 </tbody>
               </table>
             </div>
+
+            <div className="mt-10 grid gap-4 md:grid-cols-3">
+              {insights.map((c) => (
+                <div key={c.title} className="rounded-2xl border border-nh-brown/10 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-bold uppercase tracking-wide text-nh-terracotta">{c.title}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-nh-brown-muted">{c.body}</p>
+                </div>
+              ))}
+            </div>
           </>
         )}
-        <div className="mt-12">
+        <div className="mt-14">
           <SiteFooter />
         </div>
       </div>
@@ -274,7 +390,7 @@ function CompareInner() {
 
 export default function ComparePage() {
   return (
-    <Suspense fallback={<div className="p-8 text-slate-500">Loading…</div>}>
+    <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center bg-nh-cream text-nh-brown-muted">Loading…</div>}>
       <CompareInner />
     </Suspense>
   );
