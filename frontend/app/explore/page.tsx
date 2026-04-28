@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { BrandWordmark } from "@/components/BrandMark";
 import { NeighborMap } from "@/components/NeighborMap";
-import { SiteFooter } from "@/components/SiteFooter";
 import {
   API_BASE,
   getMapGeoJSON,
@@ -573,7 +572,7 @@ function ExploreInner() {
   const mapDataBrowse = augmentedBrowse ?? geojson;
   const mapDataSearch = augmentedSearch ?? searchGeojson;
   return (
-    <div className="flex min-h-screen flex-col bg-nh-cream text-nh-brown">
+    <div className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden text-nh-brown">
       <header className="shrink-0 border-b border-nh-brown/10 bg-nh-cream/95 px-4 py-3">
         <div className="mx-auto flex max-w-[1920px] flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -706,9 +705,9 @@ function ExploreInner() {
         ) : null}
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col pb-36 xl:flex-row">
-        <aside className="w-full shrink-0 border-b border-nh-brown/10 bg-white/90 xl:w-[300px] xl:border-b-0 xl:border-r">
-          <div className="max-h-[42vh] space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-7rem)]">
+      <div className="flex min-h-0 flex-1 flex-col pb-[9.5rem] pt-0 sm:pb-36 xl:flex-row xl:pb-16 ">
+        <aside className="flex max-h-[min(36vh,320px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-nh-brown/10 bg-white/90 xl:h-full xl:max-h-none xl:w-[300px] xl:border-b-0 xl:border-r">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Layer</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -914,7 +913,7 @@ function ExploreInner() {
           </div>
         </aside>
 
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col px-2 pt-2 lg:px-4">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col px-2 pt-2 lg:min-h-0 lg:px-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted">
             <span className="font-semibold uppercase tracking-wide text-nh-brown">Composite view</span>
             <span>
@@ -930,14 +929,14 @@ function ExploreInner() {
           {err ? <p className="mb-2 text-sm text-red-600">{err}</p> : null}
 
           {mapMode === "search" && (
-            <div className="relative w-full flex-1">
+            <div className="relative flex min-h-0 w-full flex-1 flex-col">
               {searchMapLoading && (
-                <div className="absolute inset-0 z-20 flex min-h-[480px] items-center justify-center rounded-xl bg-white/80 text-sm font-medium text-nh-brown-muted backdrop-blur-sm lg:min-h-[calc(100vh-11rem)]">
+                <div className="absolute inset-0 z-20 flex min-h-0 flex-1 items-center justify-center rounded-xl bg-white/80 text-sm font-medium text-nh-brown-muted backdrop-blur-sm">
                   Loading search on map…
                 </div>
               )}
               {!searchMapLoading && searchGeojson && (
-                <div className="relative w-full">
+                <div className="relative flex min-h-0 flex-1 flex-col">
                   <button
                     type="button"
                     onClick={clearSearchMap}
@@ -963,23 +962,25 @@ function ExploreInner() {
           )}
 
           {mapMode === "browse" && (
-            <>
+            <div className="flex min-h-0 flex-1 flex-col gap-2">
               {stateFips != null && !err && geojson == null && (
-                <div className="flex min-h-[400px] items-center justify-center rounded-xl border border-dashed border-nh-brown/20 bg-white/80 text-sm text-nh-brown-muted">
+                <div className="flex min-h-[12rem] flex-1 items-center justify-center rounded-xl border border-dashed border-nh-brown/20 bg-white/80 text-sm text-nh-brown-muted">
                   Loading map data…
                 </div>
               )}
               {!stateFips && !err && (
-                <NeighborMap
-                  stateFips={null}
-                  data={null}
-                  variant="explore"
-                  onSelectTract={onSelectTract}
-                  showMetricControl
-                />
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <NeighborMap
+                    stateFips={null}
+                    data={null}
+                    variant="explore"
+                    onSelectTract={onSelectTract}
+                    showMetricControl
+                  />
+                </div>
               )}
               {stateFips != null && geojson != null && noData && (
-                <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
+                <div className="mb-1 shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
                   <p className="font-semibold">No map data for this state</p>
                   <p className="mt-1 text-amber-900/90">
                     Ingest tracts for <strong>{stateLabel}</strong> from <code className="rounded bg-white/80 px-1">backend/</code>:
@@ -990,23 +991,25 @@ function ExploreInner() {
                 </div>
               )}
               {stateFips != null && geojson != null && !noData && (
-                <NeighborMap
-                  stateFips={stateFips}
-                  data={mapDataBrowse}
-                  variant="explore"
-                  onSelectTract={onSelectTract}
-                  fillProperty="nh_map_value"
-                  fillLabel={mapFillLabel(layerMode)}
-                  showMetricControl={false}
-                  selectedGeoid={selectedGeoid}
-                />
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <NeighborMap
+                    stateFips={stateFips}
+                    data={mapDataBrowse}
+                    variant="explore"
+                    onSelectTract={onSelectTract}
+                    fillProperty="nh_map_value"
+                    fillLabel={mapFillLabel(layerMode)}
+                    showMetricControl={false}
+                    selectedGeoid={selectedGeoid}
+                  />
+                </div>
               )}
-            </>
+            </div>
           )}
         </div>
 
-        <aside className="w-full shrink-0 border-t border-nh-brown/10 bg-white/95 xl:w-[320px] xl:border-l xl:border-t-0">
-          <div className="max-h-[50vh] space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-7rem)]">
+        <aside className="flex max-h-[min(40vh,360px)] min-h-0 shrink-0 flex-col overflow-hidden border-t border-nh-brown/10 bg-white/95 xl:h-full xl:max-h-none xl:w-[320px] xl:border-l xl:border-t-0">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Selected tract</p>
               {!selectedGeoid && (
@@ -1118,7 +1121,7 @@ function ExploreInner() {
         </aside>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-nh-brown/10 bg-nh-cream/95 px-4 py-3 shadow-[0_-8px_24px_rgba(44,24,16,0.08)] backdrop-blur-md">
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-nh-brown/10 bg-nh-cream/95 px-4 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_rgba(44,24,16,0.08)] backdrop-blur-md sm:py-3">
         <div className="mx-auto flex max-w-[1920px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Compare tray</p>
@@ -1161,10 +1164,6 @@ function ExploreInner() {
             </button>
           </div>
         </div>
-      </div>
-
-      <div className="shrink-0">
-        <SiteFooter />
       </div>
     </div>
   );

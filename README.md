@@ -83,6 +83,7 @@ python ingest.py --states 06,12,17,36,48
 
 - Idempotent: re-run to refresh data for those states (same analysis year).
 - **HUD CHAS**: ACS proxies are used for rent burden and overcrowding in this MVP; CHAS-specific files can be wired into `ingest.py` later.
+- Docker-aware DB targeting: when run on host, `ingest.py` now auto-targets the Docker DB (`localhost:5432`) whenever the Compose `db` service is running, to avoid splitting data across two Postgres instances. Set `DOCKER_INGEST_DATABASE_URL` to override the default Docker target.
 
 ### 4. Frontend
 

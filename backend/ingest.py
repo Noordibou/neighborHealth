@@ -24,6 +24,7 @@ import logging
 import math
 import os
 import random
+import subprocess
 import tempfile
 import zipfile
 from collections import defaultdict
@@ -49,15 +50,7 @@ log = logging.getLogger("ingest")
 DATA_YEAR = 2022
 PLACES_DATASET = "hky2-3tpn"
 TIGER_YEAR = "2022"
-
-STATE_FP_TO_ABBR = {
-    "06": "CA",
-    "12": "FL",
-    "17": "IL",
-    "36": "NY",
-    "48": "TX",
-}
-
+DOCKER_INGEST_DATABASE_URL = "postgresql+asyncpg://neighborhealth:neighborhealth@localhost:5432/neighborhealth"
 
 def heat_from_lat(lat: float | None) -> float:
     """Heat-risk index 0–100 from latitude (warmer south → higher)."""
@@ -74,6 +67,41 @@ def _percentile_rank(vals: list[float], x: float) -> float:
     below = sum(1 for v in s if v < x)
     equal = sum(1 for v in s if v == x)
     return 100.0 * (below + 0.5 * equal) / n
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _docker_db_is_running() -> bool:
+    """Return True when docker compose service 'db' is currently running."""
+    compose_file = _repo_root() / "docker-compose.yml"
+    if not compose_file.exists():
+        return False
+    try:
+        p = subprocess.run(
+            ["docker", "compose", "-f", str(compose_file), "ps", "--services", "--filter", "status=running"],
+            cwd=str(_repo_root()),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    if p.returncode != 0:
+        return False
+    running = {line.strip() for line in p.stdout.splitlines() if line.strip()}
+    return "db" in running
+
+
+def _ingest_database_url() -> str:
+    """Prefer the Docker DB when it's running to avoid writing to the wrong Postgres."""
+    if os.path.exists("/.dockerenv"):
+        return os.environ.get("DATABASE_URL") or settings.database_url
+    if _docker_db_is_running():
+        return os.environ.get("DOCKER_INGEST_DATABASE_URL") or DOCKER_INGEST_DATABASE_URL
+    return os.environ.get("DATABASE_URL") or settings.database_url
 
 
 async def fetch_acs_state(client: httpx.AsyncClient, state_fips: str, census_key: str | None) -> dict[str, dict[str, float]]:
@@ -153,7 +181,7 @@ async def fetch_acs_state(client: httpx.AsyncClient, state_fips: str, census_key
 
 async def fetch_places_states(
     client: httpx.AsyncClient,
-    state_abbrs: list[str],
+    state_fips: list[str],
     app_token: str | None,
 ) -> dict[str, dict[str, float]]:
     base = f"https://chronicdata.cdc.gov/resource/{PLACES_DATASET}.json"
@@ -162,7 +190,7 @@ async def fetch_places_states(
         headers["X-App-Token"] = app_token
 
     out: dict[str, dict[str, float]] = {}
-    where_clause = "(" + " OR ".join([f"stateabbr='{s}'" for s in state_abbrs]) + ")"
+    where_clause = "(" + " OR ".join([f"tractfips like '{s.zfill(2)}%'" for s in state_fips]) + ")"
     offset = 0
     page = 50000
 
@@ -305,8 +333,15 @@ def _place_by_tract_geoid(
     if tract_gdf.crs != place_gdf.crs:
         place_gdf = place_gdf.to_crs(tract_gdf.crs)
     tg = tract_gdf[[geoid_col, "geometry"]].copy()
-    pts = tg.copy()
-    pts["geometry"] = tg.geometry.centroid
+    if tg.crs is not None and tg.crs.is_geographic:
+        # Compute centroids in a projected CRS to avoid geographic-CRS centroid distortion/warnings.
+        tg_projected = tg.to_crs("EPSG:5070")
+        pts = tg_projected.copy()
+        pts["geometry"] = tg_projected.geometry.centroid
+        pts = pts.to_crs(tg.crs)
+    else:
+        pts = tg.copy()
+        pts["geometry"] = tg.geometry.centroid
     name_col = "NAME" if "NAME" in place_gdf.columns else "NAMELSAD"
     pj = place_gdf[[name_col, "geometry"]].copy()
     joined = gpd.sjoin(pts, pj, how="left", predicate="within")
@@ -429,18 +464,18 @@ async def update_percentiles(session: AsyncSession, year: int) -> None:
 
 
 async def run_ingest(states: list[str]) -> None:
-    engine = create_async_engine(settings.database_url, echo=False)
+    database_url = _ingest_database_url()
+    log.info("Using database URL: %s", database_url)
+    engine = create_async_engine(database_url, echo=False)
     async_session = async_sessionmaker(engine, expire_on_commit=False)
 
     census_key = os.environ.get("CENSUS_API_KEY") or settings.census_api_key
     cdc_token = os.environ.get("CDC_API_KEY") or settings.cdc_api_key
 
     async with async_session() as session:
-        abbrs = [STATE_FP_TO_ABBR[s.zfill(2)] for s in states]
-
         async with httpx.AsyncClient(timeout=600.0) as http:
             log.info("Fetching PLACES…")
-            places = await fetch_places_states(http, abbrs, cdc_token)
+            places = await fetch_places_states(http, states, cdc_token)
             log.info("PLACES rows: %s", len(places))
 
             log.info("Loading TIGER US county boundaries (once)…")

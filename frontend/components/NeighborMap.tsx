@@ -208,6 +208,8 @@ type Props = {
   showMetricControl?: boolean;
   /** Strong outline for the active tract (GEOID string). */
   selectedGeoid?: string | null;
+  /** Tailwind bottom position for the hover card (explore mode; use when a bottom bar covers the map). */
+  hoverLegendBottomClassName?: string;
 };
 
 function bboxFromGeoJSON(fc: GeoJSON.FeatureCollection): [[number, number], [number, number]] | null {
@@ -352,6 +354,7 @@ export function NeighborMap({
   fillLabel = "Priority index",
   showMetricControl = true,
   selectedGeoid = null,
+  hoverLegendBottomClassName,
 }: Props) {
   const mapRef = useRef<MapRef>(null);
   const styleUrl = mapStyle ?? process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? DEFAULT_MAP_STYLE;
@@ -595,13 +598,20 @@ export function NeighborMap({
   const fmtPct = (v: number | null, digits = 0) =>
     v != null && Number.isFinite(v) ? `${digits ? v.toFixed(digits) : Math.round(v)}%` : "—";
 
+  const hoverBottom =
+    variant === "explore"
+      ? hoverLegendBottomClassName ?? "bottom-5 sm:bottom-4"
+      : "bottom-4";
+
   const hoverLegend =
     hoverInfo && hasTracts ? (() => {
       const { headline, subline } = formatHoverLocation(hoverInfo);
       const hasMetrics = hoverHasShownMetrics(hoverInfo);
       return (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 w-[min(94vw,26rem)] -translate-x-1/2">
-          <div className="rounded-xl border border-nh-brown/40 bg-nh-brown/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm">
+        <div
+          className={`pointer-events-none absolute left-1/2 z-10 w-[min(94vw,26rem)] max-w-[calc(100%-1rem)] -translate-x-1/2 ${hoverBottom}`}
+        >
+          <div className="max-h-[min(40dvh,20rem)] overflow-y-auto overscroll-contain rounded-xl border border-nh-brown/40 bg-nh-brown/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm sm:max-h-[min(45dvh,22rem)]">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-100/90">Area under cursor</p>
             <p className="mt-1 line-clamp-2 text-sm font-semibold leading-snug">{headline}</p>
             {subline ? (
@@ -716,9 +726,9 @@ export function NeighborMap({
   );
 
   if (variant === "explore") {
-    /* Explicit height: parent `h-full` + `lg:min-h-0` often collapses to 0 on flex layouts, which hides the map canvas. */
+    /* Fill parent flex height; avoid raw 100vh so bottom UI (compare tray) does not clip the map/hover card. */
     return (
-      <div className="relative isolate h-[560px] w-full overflow-hidden rounded-xl border border-nh-brown/10 bg-nh-sand/40 shadow-inner sm:h-[64vh] lg:h-[calc(100vh-8.5rem)]">
+      <div className="relative isolate h-full min-h-[220px] w-full flex-1 overflow-hidden rounded-xl border border-nh-brown/10 bg-nh-sand/40 shadow-inner sm:min-h-[260px]">
         {layerPanel ? (
         <div className="pointer-events-none absolute left-3 top-3 z-10 max-h-[70vh] overflow-y-auto">
           <div className="pointer-events-auto">{layerPanel}</div>
