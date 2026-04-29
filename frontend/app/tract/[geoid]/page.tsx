@@ -20,11 +20,43 @@ const STATE_ABBR: Record<string, string> = {
 
 export default async function TractPage({ params }: Props) {
   const { geoid } = await params;
-  let tract;
+  let tract: Awaited<ReturnType<typeof getTract>> | null = null;
+  let unavailableMessage: string | null = null;
   try {
     tract = await getTract(geoid);
-  } catch {
-    notFound();
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // Only show Next.js 404 when the backend confirms tract is missing.
+    if (msg.startsWith("404")) {
+      notFound();
+    }
+    unavailableMessage = msg || "Could not reach API";
+  }
+
+  if (!tract) {
+    return (
+      <div className="min-h-screen bg-nh-cream text-nh-brown">
+        <div className="mx-auto max-w-3xl px-4 py-12">
+          <TractMapBackControl />
+          <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+            <h1 className="font-display text-2xl font-semibold text-nh-brown">Tract profile unavailable</h1>
+            <p className="mt-2 text-sm text-nh-brown-muted">
+              The app could not reach the API to load this tract right now. This is usually caused by the backend not
+              running or an incorrect `NEXT_PUBLIC_API_URL`.
+            </p>
+            <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-xs text-nh-brown-muted">
+              GEOID: <span className="font-mono">{geoid}</span>
+              {unavailableMessage ? (
+                <>
+                  {" "}
+                  · Error: <span className="font-mono">{unavailableMessage}</span>
+                </>
+              ) : null}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   let summary: { summary_text: string; generated_at: string } | null = null;

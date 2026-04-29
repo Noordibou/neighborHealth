@@ -102,6 +102,8 @@ function ExploreInner() {
   const [selectedDetail, setSelectedDetail] = useState<TractDetail | null>(null);
   const [selectedDetailErr, setSelectedDetailErr] = useState<string | null>(null);
   const [shareHint, setShareHint] = useState<string | null>(null);
+  const [filtersPanelExpanded, setFiltersPanelExpanded] = useState(true);
+  const [searchResultsExpanded, setSearchResultsExpanded] = useState(true);
 
   const [draft, setDraft] = useState({
     minScore: 0,
@@ -505,6 +507,12 @@ function ExploreInner() {
     setSelectedGeoid(geoid);
   }, []);
 
+  /** Indicator weights only affect choropleth when layer mode is Custom (`weighted`). */
+  const onWeightSliderChange = useCallback((key: keyof MapWeightPercents, value: number) => {
+    setLayerMode("weighted");
+    setWeights((w) => ({ ...w, [key]: value } as MapWeightPercents));
+  }, []);
+
   const augmentedBrowse = useMemo(() => {
     if (!geojson?.features?.length) return null;
     const mode: MapLayerMode = layerMode === "weighted" ? "weighted" : layerMode;
@@ -568,6 +576,157 @@ function ExploreInner() {
     { key: "overcrowding_pct", label: "Overcrowding" },
     { key: "asthma_pct", label: "Asthma prevalence" },
   ];
+
+  /** Map layer + list filters — stacked for the left sidebar */
+  const filtersSidebar = (
+    <div className="space-y-5">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Layer</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {layerTabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setLayerMode(t.id)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                layerMode === t.id
+                  ? "bg-nh-brown text-nh-cream shadow"
+                  : "bg-nh-cream text-nh-brown-muted ring-1 ring-nh-brown/10 hover:bg-white"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] leading-snug text-nh-brown-muted">
+          {layerMode === "weighted"
+            ? "Map reflects your indicator weights (normalized to 100%)."
+            : "Composite uses stored model scores; Housing colors by rent burden; Health blends uninsured, asthma, and disability."}
+        </p>
+      </div>
+
+      <div className="border-t border-nh-brown/10 pt-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Indicator weights</p>
+          <button
+            type="button"
+            className="text-xs font-semibold text-nh-terracotta hover:underline"
+            onClick={() => setWeights({ ...DEFAULT_MAP_WEIGHTS })}
+          >
+            Reset
+          </button>
+        </div>
+        <div className="mt-3 max-h-[min(40vh,280px)] space-y-3 overflow-y-auto pr-1">
+          {weightFields.map(({ key, label }) => (
+            <div key={key}>
+              <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
+                <span>{label}</span>
+                <span>{weights[key]}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={60}
+                value={weights[key]}
+                onChange={(e) => onWeightSliderChange(key, Number(e.target.value))}
+                className="mt-1 w-full accent-nh-terracotta"
+              />
+            </div>
+          ))}
+        </div>
+        {layerMode !== "weighted" ? (
+          <p className="mt-3 text-[11px] leading-snug text-nh-brown-muted">
+            Adjusting a slider switches the map to <strong className="font-semibold text-nh-brown">Custom</strong> so the
+            blend updates on the map.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="border-t border-nh-brown/10 pt-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">State</p>
+        {mapMode === "search" && (
+          <p className="mb-2 mt-1 text-[11px] text-amber-900/90">
+            Search map active — exit search to change state layer.
+          </p>
+        )}
+        <ul className="mt-2 max-h-44 space-y-1.5 overflow-y-auto text-sm">
+          <li>
+            <label className="flex cursor-pointer items-center gap-2 text-nh-brown-muted">
+              <input
+                type="radio"
+                name="state"
+                checked={stateFips === null}
+                onChange={() => {
+                  setStateFips(null);
+                  clearSearchMap();
+                }}
+                className="border-nh-brown/30 text-nh-terracotta focus:ring-nh-terracotta"
+              />
+              US overview
+            </label>
+          </li>
+          {STATES.map((s) => (
+            <li key={s.fips}>
+              <label className="flex cursor-pointer items-center gap-2 text-nh-brown">
+                <input
+                  type="radio"
+                  name="state"
+                  checked={stateFips === s.fips}
+                  onChange={() => {
+                    setStateFips(s.fips);
+                    clearSearchMap();
+                  }}
+                  className="border-nh-brown/30 text-nh-terracotta focus:ring-nh-terracotta"
+                />
+                {s.label}
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="border-t border-nh-brown/10 pt-4">
+        <p className="text-xs font-semibold uppercase text-nh-brown-muted">Refine ranking list</p>
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
+              <span>Rent burden ≥</span>
+              <span>{draft.minRent}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={draft.minRent}
+              onChange={(e) => setDraft((d) => ({ ...d, minRent: Number(e.target.value) }))}
+              className="mt-1 w-full accent-nh-terracotta"
+            />
+          </div>
+          <div>
+            <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
+              <span>Uninsured ≥</span>
+              <span>{draft.minUninsured}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={50}
+              value={draft.minUninsured}
+              onChange={(e) => setDraft((d) => ({ ...d, minUninsured: Number(e.target.value) }))}
+              className="mt-1 w-full accent-nh-terracotta"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={applyFilters}
+            className="w-full rounded-xl bg-nh-brown py-2.5 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
+          >
+            Apply filters
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   const mapDataBrowse = augmentedBrowse ?? geojson;
   const mapDataSearch = augmentedSearch ?? searchGeojson;
@@ -681,235 +840,92 @@ function ExploreInner() {
         {searchInfo && !searchError ? (
           <p className="mx-auto mt-2 max-w-[1920px] px-4 text-xs text-nh-brown-muted">{searchInfo}</p>
         ) : null}
-        {searchResults && searchResults.length > 0 ? (
-          <div className="mx-auto max-w-[1920px] border-t border-nh-brown/10 px-4 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">
-              Matches ({searchResults.length})
-            </p>
-            <ul className="mt-1 flex max-h-36 flex-wrap gap-1.5 overflow-y-auto">
-              {searchResults.map((r) => (
-                <li
-                  key={r.geoid}
-                  className="flex items-center gap-1 rounded-full border border-nh-brown/10 bg-white pl-2 pr-1 text-xs shadow-sm"
-                >
-                  <button type="button" className="max-w-[160px] truncate py-1 text-left font-medium text-nh-brown" onClick={() => onSelectTract(r.geoid)}>
-                    {r.name ?? r.geoid}
-                  </button>
-                  <Link href={`/tract/${r.geoid}`} className="shrink-0 rounded-full bg-nh-cream px-2 py-0.5 text-[10px] font-semibold text-nh-terracotta hover:bg-nh-sand">
-                    Profile
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col pb-[9.5rem] pt-0 sm:pb-36 xl:flex-row xl:pb-16 ">
-        <aside className="flex max-h-[min(36vh,320px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-nh-brown/10 bg-white/90 xl:h-full xl:max-h-none xl:w-[300px] xl:border-b-0 xl:border-r">
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Layer</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {layerTabs.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setLayerMode(t.id)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                      layerMode === t.id
-                        ? "bg-nh-brown text-nh-cream shadow"
-                        : "bg-nh-cream text-nh-brown-muted ring-1 ring-nh-brown/10 hover:bg-white"
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-2 text-[11px] leading-snug text-nh-brown-muted">
-                {layerMode === "weighted"
-                  ? "Map reflects your indicator weights (normalized to 100%)."
-                  : "Composite uses stored model scores; Housing colors by rent burden; Health blends uninsured, asthma, and disability."}
-              </p>
-            </div>
-
-            <div className="border-t border-nh-brown/10 pt-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Indicator weights</p>
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-nh-terracotta hover:underline"
-                  onClick={() => setWeights({ ...DEFAULT_MAP_WEIGHTS })}
-                >
-                  Reset
-                </button>
-              </div>
-              <div className="mt-3 space-y-3">
-                {weightFields.map(({ key, label }) => (
-                  <div key={key}>
-                    <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
-                      <span>{label}</span>
-                      <span>{weights[key]}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={60}
-                      value={weights[key]}
-                      onChange={(e) =>
-                        setWeights((w) => ({ ...w, [key]: Number(e.target.value) } as MapWeightPercents))
-                      }
-                      className="mt-1 w-full accent-nh-terracotta"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="border-t border-nh-brown/10 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">List filters</p>
-              <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-nh-brown">
-                <input
-                  type="checkbox"
-                  checked={draft.minScore >= 50}
-                  onChange={(e) => setDraft((d) => ({ ...d, minScore: e.target.checked ? 50 : 0 }))}
-                  className="rounded border-nh-brown/30 text-nh-terracotta focus:ring-nh-terracotta"
-                />
-                Score ≥ 50 (apply to list)
-              </label>
-              <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-nh-brown-muted">
-                <input type="checkbox" disabled className="rounded border-nh-brown/20" />
-                Population ≥ 3,000 (needs ACS field)
-              </label>
-              <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-nh-brown-muted">
-                <input type="checkbox" disabled className="rounded border-nh-brown/20" />
-                FQHC coverage (coming soon)
-              </label>
-            </div>
-
-            <div className="border-t border-nh-brown/10 pt-4">
-              <label className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Benchmark</label>
-              <select
-                disabled
-                className="mt-1 w-full rounded-lg border border-nh-brown/15 bg-nh-cream/50 px-2 py-2 text-sm text-nh-brown-muted"
-                value=""
-              >
-                <option>{stateLabel} (default)</option>
-              </select>
-            </div>
-
-            <div className="border-t border-nh-brown/10 pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">State</p>
-              {mapMode === "search" && (
-                <p className="mb-2 mt-1 text-[11px] text-amber-900/90">
-                  Search map active — exit search to change state layer.
-                </p>
-              )}
-              <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto text-sm">
-                <li>
-                  <label className="flex cursor-pointer items-center gap-2 text-nh-brown-muted">
-                    <input
-                      type="radio"
-                      name="state"
-                      checked={stateFips === null}
-                      onChange={() => {
-                        setStateFips(null);
-                        clearSearchMap();
-                      }}
-                      className="border-nh-brown/30 text-nh-terracotta focus:ring-nh-terracotta"
-                    />
-                    US overview
-                  </label>
-                </li>
-                {STATES.map((s) => (
-                  <li key={s.fips}>
-                    <label className="flex cursor-pointer items-center gap-2 text-nh-brown">
-                      <input
-                        type="radio"
-                        name="state"
-                        checked={stateFips === s.fips}
-                        onChange={() => {
-                          setStateFips(s.fips);
-                          clearSearchMap();
-                        }}
-                        className="border-nh-brown/30 text-nh-terracotta focus:ring-nh-terracotta"
-                      />
-                      {s.label}
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="space-y-3 border-t border-nh-brown/10 pt-4">
-              <p className="text-xs font-semibold uppercase text-nh-brown-muted">Refine ranking</p>
-              <div>
-                <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
-                  <span>Rent burden ≥</span>
-                  <span>{draft.minRent}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={draft.minRent}
-                  onChange={(e) => setDraft((d) => ({ ...d, minRent: Number(e.target.value) }))}
-                  className="mt-1 w-full accent-nh-terracotta"
-                />
-              </div>
-              <div>
-                <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
-                  <span>Uninsured ≥</span>
-                  <span>{draft.minUninsured}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={50}
-                  value={draft.minUninsured}
-                  onChange={(e) => setDraft((d) => ({ ...d, minUninsured: Number(e.target.value) }))}
-                  className="mt-1 w-full accent-nh-terracotta"
-                />
-              </div>
-              <div>
-                <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
-                  <span>Asthma (for high filter)</span>
-                  <span>{draft.asthma}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={30}
-                  value={draft.asthma}
-                  onChange={(e) => setDraft((d) => ({ ...d, asthma: Number(e.target.value) }))}
-                  className="mt-1 w-full accent-nh-terracotta"
-                />
-              </div>
-              <div>
-                <p className="text-[11px] font-medium text-nh-brown-muted">Area type</p>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  {(["", "urban", "rural"] as const).map((v) => (
-                    <label key={v || "any"} className="flex cursor-pointer items-center gap-1.5 text-xs text-nh-brown">
-                      <input
-                        type="radio"
-                        name="urban_rural"
-                        checked={draft.urbanRural === v}
-                        onChange={() => setDraft((d) => ({ ...d, urbanRural: v }))}
-                        className="border-nh-brown/30 text-nh-terracotta"
-                      />
-                      {v === "" ? "Any" : v === "urban" ? "Urban" : "Rural"}
-                    </label>
-                  ))}
-                </div>
-              </div>
+        <aside className="flex max-h-[min(52vh,420px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-nh-brown/10 bg-white/90 xl:h-full xl:max-h-none xl:w-[380px] xl:border-b-0 xl:border-r">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <section className="rounded-xl border border-nh-brown/10 bg-nh-cream/40 p-3 shadow-sm">
               <button
                 type="button"
-                onClick={applyFilters}
-                className="w-full rounded-xl bg-nh-brown py-2.5 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
+                onClick={() => setFiltersPanelExpanded((v) => !v)}
+                className="flex w-full items-start justify-between gap-2 rounded-lg text-left outline-none ring-nh-terracotta hover:bg-white/50 focus-visible:ring-2"
+                aria-expanded={filtersPanelExpanded}
               >
-                Apply filters
+                <h2 className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">
+                  Map options & filters
+                </h2>
+                <span className="shrink-0 text-[11px] font-semibold text-nh-brown-muted tabular-nums">
+                  {filtersPanelExpanded ? "Hide" : "Show"}
+                </span>
               </button>
-            </div>
+              {filtersPanelExpanded ? <div className="mt-3">{filtersSidebar}</div> : null}
+            </section>
+
+            <section className="mt-6 border-t border-nh-brown/10 pt-5">
+              <button
+                type="button"
+                onClick={() => setSearchResultsExpanded((v) => !v)}
+                className="flex w-full items-start justify-between gap-2 rounded-lg text-left outline-none ring-nh-terracotta hover:bg-nh-cream/60 focus-visible:ring-2"
+                aria-expanded={searchResultsExpanded}
+              >
+                <div className="min-w-0">
+                  <span className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Search results</span>
+                  <span className="ml-2 text-[11px] font-normal text-nh-brown-muted tabular-nums">
+                    ({searchResults?.length ?? 0})
+                  </span>
+                </div>
+                <span className="shrink-0 text-[11px] font-semibold text-nh-brown-muted tabular-nums">
+                  {searchResultsExpanded ? "Hide" : "Show"}
+                </span>
+              </button>
+              {searchResultsExpanded ? (
+                <>
+                  <p className="mt-2 text-[11px] text-nh-brown-muted">
+                    {searchResults?.length
+                      ? "Select a result to focus tract details on the right panel."
+                      : "Run a search from the top bar to list matched tracts here."}
+                  </p>
+                  {searchResults?.length ? (
+                    <ul className="mt-3 space-y-2">
+                      {searchResults.map((r, idx) => {
+                        const isSel = selectedGeoid === r.geoid;
+                        return (
+                          <li
+                            key={r.geoid}
+                            className={`rounded-xl border p-2 ${
+                              isSel ? "border-nh-brown bg-white shadow-sm" : "border-nh-brown/10 bg-nh-cream/30"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => onSelectTract(r.geoid)}
+                              className="w-full text-left"
+                            >
+                              <span className="text-[10px] font-mono text-nh-brown-muted">#{idx + 1}</span>
+                              <p className="truncate text-sm font-semibold text-nh-brown">{r.name ?? `Tract ${r.geoid}`}</p>
+                              <p className="truncate text-[11px] text-nh-brown-muted">{r.county_name ?? "—"}</p>
+                            </button>
+                            <div className="mt-2 flex items-center justify-between">
+                              <span className="text-xs font-semibold text-nh-terracotta">
+                                Score {r.composite_score != null ? Math.round(r.composite_score) : "—"}
+                              </span>
+                              <Link href={`/tract/${r.geoid}`} className="text-xs font-semibold text-nh-terracotta hover:underline">
+                                Profile →
+                              </Link>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-dashed border-nh-brown/20 bg-nh-cream/40 px-3 py-3 text-xs text-nh-brown-muted">
+                      Examples: tract GEOID, neighborhood, ZIP, county, or street address.
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </section>
           </div>
         </aside>
 

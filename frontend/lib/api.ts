@@ -1,4 +1,16 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+function normalizeApiBase(raw: string): string {
+  const t = (raw || "").trim().replace(/\/+$/, "");
+  if (!t) return "http://localhost:8000";
+  // On server-side Next.js fetch, localhost can resolve to ::1 while API may be bound only on 127.0.0.1.
+  if (typeof window === "undefined") {
+    return t.replace("://localhost", "://127.0.0.1");
+  }
+  return t;
+}
+
+const CLIENT_API_BASE = normalizeApiBase(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000");
+const SERVER_API_BASE = normalizeApiBase(process.env.INTERNAL_API_URL ?? CLIENT_API_BASE);
+const API_BASE = typeof window === "undefined" ? SERVER_API_BASE : CLIENT_API_BASE;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
