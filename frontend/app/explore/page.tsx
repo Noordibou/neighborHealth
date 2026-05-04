@@ -8,6 +8,7 @@ import { NeighborMap } from "@/components/NeighborMap";
 import {
   API_BASE,
   getMapGeoJSON,
+  getStates,
   getTract,
   getTractList,
   postMapTractsByGeoids,
@@ -25,21 +26,7 @@ import {
   parseExploreMapSession,
   serializeExploreMapSession,
 } from "@/lib/exploreMapSession";
-import {
-  augmentGeoJSONForMap,
-  DEFAULT_MAP_WEIGHTS,
-  type MapLayerMode,
-  type MapWeightPercents,
-} from "@/lib/mapGeojson";
-
-const STATES = [
-  { fips: "42", label: "Pennsylvania" },
-  { fips: "06", label: "California" },
-  { fips: "48", label: "Texas" },
-  { fips: "36", label: "New York" },
-  { fips: "12", label: "Florida" },
-  { fips: "17", label: "Illinois" },
-];
+import { augmentGeoJSONForMap, type MapLayerMode } from "@/lib/mapGeojson";
 
 const STATE_ABBR: Record<string, string> = {
   "42": "PA",
@@ -53,8 +40,38 @@ const STATE_ABBR: Record<string, string> = {
 function mapFillLabel(mode: MapLayerMode): string {
   if (mode === "composite") return "Priority index — composite";
   if (mode === "housing") return "Housing — rent burden";
-  if (mode === "health") return "Health — blended uninsured, asthma, disability";
-  return "Custom weighted index";
+  return "Health — blended uninsured, asthma, disability";
+}
+
+const TOP_TRACT_LAYER_HEADING: Record<MapLayerMode, string> = {
+  composite: "COMPOSITE",
+  housing: "HOUSING",
+  health: "HEALTH",
+};
+
+/** Sidebar indicator bars — matches tract detail `metric_name` keys */
+const SIDEBAR_METRICS: { metric_name: string; label: string }[] = [
+  { metric_name: "rent_burden_pct", label: "Rent burden" },
+  { metric_name: "overcrowding_pct", label: "Overcrowding" },
+  { metric_name: "asthma_pct", label: "Asthma prevalence" },
+  { metric_name: "uninsured_pct", label: "Uninsured" },
+  { metric_name: "disability_pct", label: "Disability" },
+];
+
+function indicatorValue(indicators: TractDetail["indicators"], metric_name: string): number | null {
+  const row = indicators.find((i) => i.metric_name === metric_name);
+  return row?.value != null && Number.isFinite(row.value) ? row.value : null;
+}
+
+/** Warm ramp for bar fill from low (sand) to high (terracotta) */
+function barFillStyle(pct: number): { background: string } {
+  const t = Math.max(0, Math.min(1, pct / 100));
+  const lo = [232, 212, 196];
+  const hi = [179, 92, 58];
+  const r = Math.round(lo[0] + (hi[0] - lo[0]) * t);
+  const g = Math.round(lo[1] + (hi[1] - lo[1]) * t);
+  const b = Math.round(lo[2] + (hi[2] - lo[2]) * t);
+  return { background: `rgb(${r},${g},${b})` };
 }
 
 /** Prefer Census address geocoder when the query looks like a street address (not a bare GEOID). */
@@ -64,8 +81,6 @@ function looksLikeUsStreetAddress(s: string): boolean {
   if (/^\d{11}$/.test(t)) return false;
   return /^\d+\s/.test(t);
 }
-
-type Preview = { rent: number | null; uninsured: number | null };
 
 type MapMode = "browse" | "search";
 
@@ -94,16 +109,16 @@ function ExploreInner() {
     { geoid: string; composite_score: number | null; name: string | null; county_name: string | null }[]
   >([]);
   const [rankedTotal, setRankedTotal] = useState(0);
-  const [previews, setPreviews] = useState<Record<string, Preview>>({});
   const [layerMode, setLayerMode] = useState<MapLayerMode>("composite");
-  const [weights, setWeights] = useState<MapWeightPercents>(DEFAULT_MAP_WEIGHTS);
   const [compareTray, setCompareTray] = useState<string[]>([]);
   const [selectedGeoid, setSelectedGeoid] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<TractDetail | null>(null);
   const [selectedDetailErr, setSelectedDetailErr] = useState<string | null>(null);
   const [shareHint, setShareHint] = useState<string | null>(null);
-  const [filtersPanelExpanded, setFiltersPanelExpanded] = useState(true);
   const [searchResultsExpanded, setSearchResultsExpanded] = useState(true);
+  const [rankingFiltersOpen, setRankingFiltersOpen] = useState(false);
+  const [availableStates, setAvailableStates] = useState<{ state_fips: string; state_name: string }[]>([]);
+  const [usStatesGeojson, setUsStatesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
 
   const [draft, setDraft] = useState({
     minScore: 0,
@@ -181,6 +196,39 @@ function ExploreInner() {
 
   useEffect(() => {
     setCompareTray(readCompareTray());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getStates()
+      .then((rows) => {
+        if (!cancelled) {
+          setAvailableStates(
+            rows.map((r) => ({ state_fips: r.state_fips.padStart(2, "0"), state_name: r.state_name }))
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableStates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/geo/us-states.json")
+      .then((r) => r.json())
+      .then((fc: GeoJSON.FeatureCollection) => {
+        if (!cancelled) setUsStatesGeojson(fc);
+      })
+      .catch(() => {
+        if (!cancelled) setUsStatesGeojson(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -304,6 +352,14 @@ function ExploreInner() {
     setSearchError(null);
     setSearchInfo(null);
   }, []);
+
+  const clearSearch = useCallback(() => {
+    setQ("");
+    setSearchNarrowFips(null);
+    setSuggestions([]);
+    setSuggestOpen(false);
+    clearSearchMap();
+  }, [clearSearchMap]);
 
   const runSearchOnMap = useCallback(async (query: string, narrow?: string | null) => {
     const t = query.trim();
@@ -440,35 +496,8 @@ function ExploreInner() {
   }, [fetchList]);
 
   useEffect(() => {
-    const top = ranked.slice(0, 16);
-    if (!top.length) {
-      setPreviews({});
-      return;
-    }
-    let cancelled = false;
-    Promise.all(
-      top.map(async (r) => {
-        try {
-          const d = await getTract(r.geoid);
-          const rent = d.indicators.find((i) => i.metric_name === "rent_burden_pct")?.value ?? null;
-          const uninsured = d.indicators.find((i) => i.metric_name === "uninsured_pct")?.value ?? null;
-          return { geoid: r.geoid, rent, uninsured };
-        } catch {
-          return { geoid: r.geoid, rent: null, uninsured: null };
-        }
-      })
-    ).then((rows) => {
-      if (cancelled) return;
-      const next: Record<string, Preview> = {};
-      rows.forEach((row) => {
-        next[row.geoid] = { rent: row.rent, uninsured: row.uninsured };
-      });
-      setPreviews(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [ranked]);
+    if (!stateFips) setRankingFiltersOpen(false);
+  }, [stateFips]);
 
   async function onSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -507,23 +536,55 @@ function ExploreInner() {
     setSelectedGeoid(geoid);
   }, []);
 
-  /** Indicator weights only affect choropleth when layer mode is Custom (`weighted`). */
-  const onWeightSliderChange = useCallback((key: keyof MapWeightPercents, value: number) => {
-    setLayerMode("weighted");
-    setWeights((w) => ({ ...w, [key]: value } as MapWeightPercents));
+  const onSelectStateFromMap = useCallback(
+    (fips: string) => {
+      const sf = fips.padStart(2, "0").slice(0, 2);
+      clearSearchMap();
+      setStateFips(sf);
+      setSelectedGeoid(null);
+    },
+    [clearSearchMap]
+  );
+
+  const goToUsOverview = useCallback(() => {
+    setStateFips(null);
+    setGeojson(null);
+    setErr(null);
+    setSelectedGeoid(null);
   }, []);
+
+  const statePickerGeoJSON = useMemo(() => {
+    if (!usStatesGeojson?.features?.length) return null;
+    const avail = new Set(availableStates.map((s) => s.state_fips.padStart(2, "0").slice(0, 2)));
+    return {
+      type: "FeatureCollection" as const,
+      features: usStatesGeojson.features.map((f) => {
+        const rawId = f.id != null ? String(f.id) : "";
+        const state_fips = rawId.padStart(2, "0").slice(0, 2);
+        const name = (f.properties as { name?: string } | null)?.name ?? state_fips;
+        return {
+          type: "Feature" as const,
+          id: state_fips,
+          properties: {
+            name,
+            state_fips,
+            nh_has_data: avail.has(state_fips),
+          },
+          geometry: f.geometry,
+        };
+      }),
+    };
+  }, [usStatesGeojson, availableStates]);
 
   const augmentedBrowse = useMemo(() => {
     if (!geojson?.features?.length) return null;
-    const mode: MapLayerMode = layerMode === "weighted" ? "weighted" : layerMode;
-    return augmentGeoJSONForMap(geojson, mode, weights);
-  }, [geojson, layerMode, weights]);
+    return augmentGeoJSONForMap(geojson, layerMode);
+  }, [geojson, layerMode]);
 
   const augmentedSearch = useMemo(() => {
     if (!searchGeojson?.features?.length) return null;
-    const mode: MapLayerMode = layerMode === "weighted" ? "weighted" : layerMode;
-    return augmentGeoJSONForMap(searchGeojson, mode, weights);
-  }, [searchGeojson, layerMode, weights]);
+    return augmentGeoJSONForMap(searchGeojson, layerMode);
+  }, [searchGeojson, layerMode]);
 
   const priorityFlagged = useMemo(() => {
     const fc = mapMode === "search" ? augmentedSearch : augmentedBrowse;
@@ -539,9 +600,12 @@ function ExploreInner() {
   const tractCountOnMap = mapMode === "search" ? augmentedSearch?.features?.length ?? 0 : augmentedBrowse?.features?.length ?? 0;
 
   const stateLabel = useMemo(() => {
-    if (!stateFips) return "Choose a state";
-    return STATES.find((s) => s.fips === stateFips)?.label ?? stateFips;
-  }, [stateFips]);
+    if (!stateFips) return "United States";
+    const sf = stateFips.padStart(2, "0").slice(0, 2);
+    return (
+      availableStates.find((s) => s.state_fips.padStart(2, "0").slice(0, 2) === sf)?.state_name ?? `FIPS ${sf}`
+    );
+  }, [stateFips, availableStates]);
   const stateAbbr = stateFips ? STATE_ABBR[stateFips] ?? stateFips : "";
 
   const featureCount = geojson?.features?.length ?? 0;
@@ -566,164 +630,24 @@ function ExploreInner() {
     { id: "composite", label: "Composite" },
     { id: "housing", label: "Housing" },
     { id: "health", label: "Health" },
-    { id: "weighted", label: "Custom" },
   ];
 
-  const weightFields: { key: keyof MapWeightPercents; label: string }[] = [
-    { key: "rent_burden_pct", label: "Rent burden" },
-    { key: "uninsured_pct", label: "Uninsured rate" },
-    { key: "disability_pct", label: "Chronic / disability" },
-    { key: "overcrowding_pct", label: "Overcrowding" },
-    { key: "asthma_pct", label: "Asthma prevalence" },
-  ];
-
-  /** Map layer + list filters — stacked for the left sidebar */
-  const filtersSidebar = (
-    <div className="space-y-5">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Layer</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {layerTabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setLayerMode(t.id)}
-              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                layerMode === t.id
-                  ? "bg-nh-brown text-nh-cream shadow"
-                  : "bg-nh-cream text-nh-brown-muted ring-1 ring-nh-brown/10 hover:bg-white"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-[11px] leading-snug text-nh-brown-muted">
-          {layerMode === "weighted"
-            ? "Map reflects your indicator weights (normalized to 100%)."
-            : "Composite uses stored model scores; Housing colors by rent burden; Health blends uninsured, asthma, and disability."}
-        </p>
-      </div>
-
-      <div className="border-t border-nh-brown/10 pt-4">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Indicator weights</p>
+  const exploreLayerTabsEl = (
+    <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] px-3 py-3 shadow-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8e8e8e]">Layer</p>
+      <div className="mt-2 flex rounded-full bg-[#ebe6df] p-1">
+        {layerTabs.map((t) => (
           <button
+            key={t.id}
             type="button"
-            className="text-xs font-semibold text-nh-terracotta hover:underline"
-            onClick={() => setWeights({ ...DEFAULT_MAP_WEIGHTS })}
+            onClick={() => setLayerMode(t.id)}
+            className={`min-w-0 flex-1 rounded-full px-2 py-2 text-center text-xs font-semibold transition ${
+              layerMode === t.id ? "bg-[#2d2d2d] text-white shadow-sm" : "bg-transparent text-[#5c534c] hover:text-[#2d2d2d]"
+            }`}
           >
-            Reset
+            {t.label}
           </button>
-        </div>
-        <div className="mt-3 max-h-[min(40vh,280px)] space-y-3 overflow-y-auto pr-1">
-          {weightFields.map(({ key, label }) => (
-            <div key={key}>
-              <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
-                <span>{label}</span>
-                <span>{weights[key]}%</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={60}
-                value={weights[key]}
-                onChange={(e) => onWeightSliderChange(key, Number(e.target.value))}
-                className="mt-1 w-full accent-nh-terracotta"
-              />
-            </div>
-          ))}
-        </div>
-        {layerMode !== "weighted" ? (
-          <p className="mt-3 text-[11px] leading-snug text-nh-brown-muted">
-            Adjusting a slider switches the map to <strong className="font-semibold text-nh-brown">Custom</strong> so the
-            blend updates on the map.
-          </p>
-        ) : null}
-      </div>
-
-      <div className="border-t border-nh-brown/10 pt-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">State</p>
-        {mapMode === "search" && (
-          <p className="mb-2 mt-1 text-[11px] text-amber-900/90">
-            Search map active — exit search to change state layer.
-          </p>
-        )}
-        <ul className="mt-2 max-h-44 space-y-1.5 overflow-y-auto text-sm">
-          <li>
-            <label className="flex cursor-pointer items-center gap-2 text-nh-brown-muted">
-              <input
-                type="radio"
-                name="state"
-                checked={stateFips === null}
-                onChange={() => {
-                  setStateFips(null);
-                  clearSearchMap();
-                }}
-                className="border-nh-brown/30 text-nh-terracotta focus:ring-nh-terracotta"
-              />
-              US overview
-            </label>
-          </li>
-          {STATES.map((s) => (
-            <li key={s.fips}>
-              <label className="flex cursor-pointer items-center gap-2 text-nh-brown">
-                <input
-                  type="radio"
-                  name="state"
-                  checked={stateFips === s.fips}
-                  onChange={() => {
-                    setStateFips(s.fips);
-                    clearSearchMap();
-                  }}
-                  className="border-nh-brown/30 text-nh-terracotta focus:ring-nh-terracotta"
-                />
-                {s.label}
-              </label>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="border-t border-nh-brown/10 pt-4">
-        <p className="text-xs font-semibold uppercase text-nh-brown-muted">Refine ranking list</p>
-        <div className="mt-3 space-y-3">
-          <div>
-            <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
-              <span>Rent burden ≥</span>
-              <span>{draft.minRent}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={draft.minRent}
-              onChange={(e) => setDraft((d) => ({ ...d, minRent: Number(e.target.value) }))}
-              className="mt-1 w-full accent-nh-terracotta"
-            />
-          </div>
-          <div>
-            <div className="flex justify-between text-[11px] font-medium text-nh-brown-muted">
-              <span>Uninsured ≥</span>
-              <span>{draft.minUninsured}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={50}
-              value={draft.minUninsured}
-              onChange={(e) => setDraft((d) => ({ ...d, minUninsured: Number(e.target.value) }))}
-              className="mt-1 w-full accent-nh-terracotta"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={applyFilters}
-            className="w-full rounded-xl bg-nh-brown py-2.5 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
-          >
-            Apply filters
-          </button>
-        </div>
+        ))}
       </div>
     </div>
   );
@@ -733,7 +657,7 @@ function ExploreInner() {
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden text-nh-brown">
       <header className="shrink-0 border-b border-nh-brown/10 bg-nh-cream/95 px-4 py-3">
-        <div className="mx-auto flex max-w-[1920px] flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="mx-auto flex max-w-[1920px] flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <BrandWordmark />
             <p className="hidden text-xs text-nh-brown-muted sm:block">
@@ -753,71 +677,16 @@ function ExploreInner() {
               )}
             </p>
           </div>
-          <form
-            onSubmit={onSearchSubmit}
-            className="relative flex min-w-0 flex-1 flex-wrap items-center gap-2 lg:max-w-2xl"
-          >
-            <div className="relative min-w-0 flex-1">
-              <svg
-                className="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-nh-brown-muted"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                autoComplete="off"
-                className="relative z-[1] w-full rounded-full border border-nh-brown/15 bg-white py-2.5 pl-10 pr-4 text-sm text-nh-brown placeholder:text-nh-brown-muted/60 focus:border-nh-terracotta focus:outline-none focus:ring-1 focus:ring-nh-terracotta"
-                placeholder="Search tract, neighborhood, ZIP…"
-                value={q}
-                onChange={(e) => {
-                  setQ(e.target.value);
-                  setSearchNarrowFips(null);
-                }}
-                onFocus={() => setSuggestOpen(true)}
-                onBlur={() => window.setTimeout(() => setSuggestOpen(false), 180)}
-              />
-              {suggestOpen && suggestions.length > 0 && (
-                <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-nh-brown/10 bg-white py-1 shadow-lg">
-                  {suggestions.map((item, idx) => (
-                    <li key={`${item.kind}-${item.label}-${item.state_fips ?? ""}-${idx}`}>
-                      <button
-                        type="button"
-                        className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-nh-cream"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => onPickSuggestion(item)}
-                      >
-                        <span className="mt-0.5 shrink-0 rounded bg-nh-sand px-1.5 py-0.5 text-[10px] font-semibold uppercase text-nh-brown-muted">
-                          {item.kind}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="font-medium text-nh-brown">{item.label}</span>
-                          {item.detail ? (
-                            <span className="mt-0.5 block truncate text-xs text-nh-brown-muted">{item.detail}</span>
-                          ) : null}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <button
-              type="submit"
-              className="shrink-0 rounded-full bg-nh-terracotta px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-nh-terracotta-dark"
-            >
-              Go
-            </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Link
               href="/#methodology"
-              className="hidden shrink-0 text-sm font-medium text-nh-brown-muted hover:text-nh-brown md:inline"
+              className="text-sm font-medium text-nh-brown-muted hover:text-nh-brown"
             >
               Methodology
             </Link>
             <a
               href={`${API_BASE}/api/export/tracts.csv${stateFips ? `?state=${stateFips}` : ""}`}
-              className="hidden shrink-0 text-sm font-medium text-nh-brown-muted hover:text-nh-brown lg:inline"
+              className="text-sm font-medium text-nh-brown-muted hover:text-nh-brown"
             >
               Export
             </a>
@@ -829,40 +698,101 @@ function ExploreInner() {
               Share view
             </button>
             {shareHint ? <span className="text-xs text-nh-terracotta">{shareHint}</span> : null}
-          </form>
+          </div>
         </div>
-        {searchNarrowFips ? (
-          <p className="mx-auto mt-2 max-w-[1920px] px-4 text-[11px] text-nh-brown-muted">
-            Narrowed to state FIPS <span className="font-mono">{searchNarrowFips}</span>
-          </p>
-        ) : null}
-        {searchError ? <p className="mx-auto mt-2 max-w-[1920px] px-4 text-xs text-red-600">{searchError}</p> : null}
-        {searchInfo && !searchError ? (
-          <p className="mx-auto mt-2 max-w-[1920px] px-4 text-xs text-nh-brown-muted">{searchInfo}</p>
-        ) : null}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col pb-[9.5rem] pt-0 sm:pb-36 xl:flex-row xl:pb-16 ">
-        <aside className="flex max-h-[min(52vh,420px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-nh-brown/10 bg-white/90 xl:h-full xl:max-h-none xl:w-[380px] xl:border-b-0 xl:border-r">
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <aside className="flex max-h-[min(52vh,420px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-nh-brown/10 bg-white/90 xl:h-full xl:max-h-none xl:w-[360px] xl:border-b-0 xl:border-r">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
             <section className="rounded-xl border border-nh-brown/10 bg-nh-cream/40 p-3 shadow-sm">
-              <button
-                type="button"
-                onClick={() => setFiltersPanelExpanded((v) => !v)}
-                className="flex w-full items-start justify-between gap-2 rounded-lg text-left outline-none ring-nh-terracotta hover:bg-white/50 focus-visible:ring-2"
-                aria-expanded={filtersPanelExpanded}
-              >
-                <h2 className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">
-                  Map options & filters
-                </h2>
-                <span className="shrink-0 text-[11px] font-semibold text-nh-brown-muted tabular-nums">
-                  {filtersPanelExpanded ? "Hide" : "Show"}
-                </span>
-              </button>
-              {filtersPanelExpanded ? <div className="mt-3">{filtersSidebar}</div> : null}
+              <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Search</p>
+              <form onSubmit={onSearchSubmit} className="mt-2 space-y-2">
+                <div className="relative">
+                  <svg
+                    className="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-nh-brown-muted"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
+                  </svg>
+                  <input
+                    autoComplete="off"
+                    className={`relative z-[1] w-full rounded-xl border border-nh-brown/15 bg-white py-2.5 pl-10 text-sm text-nh-brown placeholder:text-nh-brown-muted/60 focus:border-nh-terracotta focus:outline-none focus:ring-1 focus:ring-nh-terracotta ${q.trim() ? "pr-10" : "pr-3"}`}
+                    placeholder="Tract, neighborhood, ZIP, address…"
+                    value={q}
+                    onChange={(e) => {
+                      setQ(e.target.value);
+                      setSearchNarrowFips(null);
+                    }}
+                    onFocus={() => setSuggestOpen(true)}
+                    onBlur={() => window.setTimeout(() => setSuggestOpen(false), 180)}
+                  />
+                  {q.trim() ? (
+                    <button
+                      type="button"
+                      aria-label="Clear search"
+                      className="absolute right-2 top-1/2 z-[2] flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-nh-brown-muted hover:bg-nh-cream hover:text-nh-brown"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        clearSearch();
+                      }}
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  ) : null}
+                  {suggestOpen && suggestions.length > 0 ? (
+                    <ul className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-xl border border-nh-brown/10 bg-white py-1 shadow-lg">
+                      {suggestions.map((item, idx) => (
+                        <li key={`${item.kind}-${item.label}-${item.state_fips ?? ""}-${idx}`}>
+                          <button
+                            type="button"
+                            className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-nh-cream"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => onPickSuggestion(item)}
+                          >
+                            <span className="mt-0.5 shrink-0 rounded bg-nh-sand px-1.5 py-0.5 text-[10px] font-semibold uppercase text-nh-brown-muted">
+                              {item.kind}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="font-medium text-nh-brown">{item.label}</span>
+                              {item.detail ? (
+                                <span className="mt-0.5 block truncate text-xs text-nh-brown-muted">{item.detail}</span>
+                              ) : null}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+                <button
+                  type="submit"
+                  className="w-full rounded-xl bg-nh-terracotta py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-nh-terracotta-dark"
+                >
+                  Search map
+                </button>
+              </form>
+              {searchNarrowFips ? (
+                <p className="mt-2 text-[11px] text-nh-brown-muted">
+                  Narrowed to state FIPS <span className="font-mono">{searchNarrowFips}</span>
+                </p>
+              ) : null}
+              {searchError ? <p className="mt-2 text-xs text-red-600">{searchError}</p> : null}
+              {searchInfo && !searchError ? (
+                <p className="mt-2 text-xs text-nh-brown-muted">{searchInfo}</p>
+              ) : null}
             </section>
 
-            <section className="mt-6 border-t border-nh-brown/10 pt-5">
+            <section className="rounded-xl border border-nh-brown/10 bg-nh-cream/40 p-3 shadow-sm">
               <button
                 type="button"
                 onClick={() => setSearchResultsExpanded((v) => !v)}
@@ -884,7 +814,7 @@ function ExploreInner() {
                   <p className="mt-2 text-[11px] text-nh-brown-muted">
                     {searchResults?.length
                       ? "Select a result to focus tract details on the right panel."
-                      : "Run a search from the top bar to list matched tracts here."}
+                      : "Use Search above, then open results here."}
                   </p>
                   {searchResults?.length ? (
                     <ul className="mt-3 space-y-2">
@@ -920,7 +850,7 @@ function ExploreInner() {
                     </ul>
                   ) : (
                     <div className="mt-3 rounded-lg border border-dashed border-nh-brown/20 bg-nh-cream/40 px-3 py-3 text-xs text-nh-brown-muted">
-                      Examples: tract GEOID, neighborhood, ZIP, county, or street address.
+                      Try a tract GEOID, place, ZIP, county, or street address in Search above.
                     </div>
                   )}
                 </>
@@ -942,7 +872,6 @@ function ExploreInner() {
               ) : null}
             </span>
           </div>
-          {err ? <p className="mb-2 text-sm text-red-600">{err}</p> : null}
 
           {mapMode === "search" && (
             <div className="relative flex min-h-0 w-full flex-1 flex-col">
@@ -971,6 +900,7 @@ function ExploreInner() {
                     fillLabel={mapFillLabel(layerMode)}
                     showMetricControl={false}
                     selectedGeoid={selectedGeoid}
+                    exploreLayerTabs={exploreLayerTabsEl}
                   />
                 </div>
               )}
@@ -985,16 +915,31 @@ function ExploreInner() {
                 </div>
               )}
               {!stateFips && !err && (
-                <div className="flex min-h-0 flex-1 flex-col">
+                <div className="relative flex min-h-0 flex-1 flex-col">
                   <NeighborMap
                     stateFips={null}
                     data={null}
                     variant="explore"
                     onSelectTract={onSelectTract}
-                    showMetricControl
+                    showMetricControl={false}
+                    exploreLayerTabs={exploreLayerTabsEl}
+                    statePickerGeoJSON={statePickerGeoJSON}
+                    onSelectStateFips={onSelectStateFromMap}
                   />
                 </div>
               )}
+              {stateFips != null && err ? (
+                <div className="flex min-h-[10rem] flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50/90 px-4 py-6 text-center">
+                  <p className="text-sm text-red-700">{err}</p>
+                  <button
+                    type="button"
+                    onClick={goToUsOverview}
+                    className="rounded-full border border-nh-brown/15 bg-white px-4 py-2 text-xs font-semibold text-nh-brown shadow hover:bg-white"
+                  >
+                    ← All states
+                  </button>
+                </div>
+              ) : null}
               {stateFips != null && geojson != null && noData && (
                 <div className="mb-1 shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
                   <p className="font-semibold">No map data for this state</p>
@@ -1006,8 +951,15 @@ function ExploreInner() {
                   </pre>
                 </div>
               )}
-              {stateFips != null && geojson != null && !noData && (
-                <div className="flex min-h-0 flex-1 flex-col">
+              {stateFips != null && !err && geojson != null && !noData && (
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  <button
+                    type="button"
+                    onClick={goToUsOverview}
+                    className="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-nh-brown/15 bg-white/95 px-4 py-1.5 text-xs font-semibold text-nh-brown shadow hover:bg-white"
+                  >
+                    ← All states
+                  </button>
                   <NeighborMap
                     stateFips={stateFips}
                     data={mapDataBrowse}
@@ -1017,6 +969,7 @@ function ExploreInner() {
                     fillLabel={mapFillLabel(layerMode)}
                     showMetricControl={false}
                     selectedGeoid={selectedGeoid}
+                    exploreLayerTabs={exploreLayerTabsEl}
                   />
                 </div>
               )}
@@ -1024,110 +977,245 @@ function ExploreInner() {
           )}
         </div>
 
-        <aside className="flex max-h-[min(40vh,360px)] min-h-0 shrink-0 flex-col overflow-hidden border-t border-nh-brown/10 bg-white/95 xl:h-full xl:max-h-none xl:w-[320px] xl:border-l xl:border-t-0">
+        <aside className="flex max-h-[min(40vh,360px)] min-h-0 shrink-0 flex-col overflow-hidden border-t border-[#e8e3dc] bg-[#faf8f5] xl:h-full xl:max-h-none xl:w-[380px] xl:border-l xl:border-t-0">
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Selected tract</p>
               {!selectedGeoid && (
-                <p className="mt-2 text-sm text-nh-brown-muted">Click a tract on the map to inspect scores and add to compare.</p>
+                <p className="text-sm leading-relaxed text-[#6b6560]">
+                  Click a tract on the map to inspect scores and add to compare.
+                </p>
               )}
               {selectedGeoid && selectedDetailErr && (
                 <p className="mt-2 text-sm text-red-600">{selectedDetailErr}</p>
               )}
               {selectedDetail && (
-                <div className="mt-3 rounded-xl border border-nh-brown/10 bg-nh-cream/50 p-3">
-                  <p className="font-display text-lg font-semibold text-nh-brown">
-                    {selectedDetail.name ?? `Tract ${selectedDetail.geoid}`}
-                  </p>
-                  <p className="text-xs text-nh-brown-muted">
-                    {selectedDetail.county_name}
-                    {stateAbbr ? `, ${stateAbbr}` : ""}
-                  </p>
-                  <div className="mt-3 flex items-end justify-between gap-2">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase text-nh-brown-muted">Index</p>
-                      <p className="font-display text-3xl font-bold text-nh-terracotta">
+                <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] p-4 shadow-sm">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8e8e8e]">Selected tract</p>
+                  <div className="mt-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-display text-xl font-bold leading-tight text-[#2d2d2d]">
+                        {selectedDetail.name ?? `Tract ${selectedDetail.geoid}`}
+                      </h3>
+                      <p className="mt-1 text-sm text-[#6b6560]">
+                        <span className="font-mono text-[13px]">{selectedDetail.geoid}</span>
+                        <span className="text-[#c4bcb4]"> · </span>
+                        {selectedDetail.place_name ?? selectedDetail.county_name ?? "—"}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">Index</p>
+                      <p className="font-display text-[2.75rem] font-bold leading-none text-[#c4a574]">
                         {selectedDetail.risk_score?.composite_score != null
                           ? Math.round(selectedDetail.risk_score.composite_score)
                           : "—"}
                       </p>
                     </div>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <Link
+                      href={`/tract/${selectedDetail.geoid}`}
+                      className="flex min-w-0 flex-1 basis-[calc(50%-0.25rem)] items-center justify-center rounded-full bg-[#b34d3a] px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-[#9a4131]"
+                    >
+                      View profile →
+                    </Link>
                     <button
                       type="button"
                       onClick={() => setCompareTray(addToCompareTray(selectedDetail.geoid))}
                       disabled={compareTray.includes(selectedDetail.geoid) || compareTray.length >= 4}
-                      className="rounded-lg border border-nh-brown/20 px-2 py-1 text-xs font-semibold text-nh-brown hover:bg-white disabled:opacity-40"
+                      className={`flex min-w-0 flex-1 basis-[calc(50%-0.25rem)] items-center justify-center rounded-full border-2 px-4 py-2.5 text-sm font-semibold shadow-sm transition disabled:opacity-40 ${
+                        compareTray.includes(selectedDetail.geoid)
+                          ? "border-[#b34d3a] bg-white text-[#b34d3a]"
+                          : "border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/40"
+                      }`}
                     >
-                      {compareTray.includes(selectedDetail.geoid) ? "In tray" : "+ Compare"}
+                      {compareTray.includes(selectedDetail.geoid) ? "✓ In compare" : "+ Compare"}
                     </button>
                   </div>
-                  <Link
-                    href={`/tract/${selectedDetail.geoid}`}
-                    className="mt-3 inline-flex text-sm font-semibold text-nh-terracotta hover:underline"
-                  >
-                    View profile →
-                  </Link>
+
+                  <div className="mt-6 space-y-4">
+                    {SIDEBAR_METRICS.map(({ metric_name, label }) => {
+                      const v = indicatorValue(selectedDetail.indicators, metric_name);
+                      const pct = v != null ? Math.min(100, Math.max(0, v)) : null;
+                      return (
+                        <div key={metric_name}>
+                          <div className="flex justify-between text-xs text-[#2d2d2d]">
+                            <span>{label}</span>
+                            <span className="tabular-nums font-semibold">
+                              {v != null
+                                ? `${metric_name === "uninsured_pct" ? v.toFixed(1) : Math.round(v)}%`
+                                : "—"}
+                            </span>
+                          </div>
+                          <div className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-[#ebe6df]">
+                            {pct != null ? (
+                              <div
+                                className="absolute left-0 top-0 h-full rounded-full"
+                                style={{ width: `${pct}%`, ...barFillStyle(pct) }}
+                              />
+                            ) : null}
+                            <div
+                              className="pointer-events-none absolute left-1/2 top-0 z-[1] h-full w-px -translate-x-1/2 border-l border-dashed border-[#9ca3af]"
+                              aria-hidden
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-5 border-t border-[#e8e3dc] pt-3 text-[10px] leading-snug text-[#8e8e8e]">
+                    <span className="inline-block translate-y-px border-l border-dashed border-[#9ca3af] pl-1">
+                      Dashed line = county benchmark (50th percentile scale)
+                    </span>
+                  </p>
                 </div>
               )}
             </div>
 
-            <div className="border-t border-nh-brown/10 pt-4">
-              <div className="flex items-baseline justify-between gap-2">
-                <h2 className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Top tracts</h2>
-                <span className="text-[11px] text-nh-brown-muted">
-                  {ranked.length} / {rankedTotal || "—"}
-                </span>
+            <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] shadow-sm">
+              <div className="flex items-center justify-between gap-2 border-b border-[#ebe6df] px-4 py-3">
+                <h2 className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5c4a42]">
+                  Top tracts — {TOP_TRACT_LAYER_HEADING[layerMode]}
+                </h2>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className="text-[11px] tabular-nums text-[#8e8e8e]">
+                    {ranked.length} / {rankedTotal || "—"}
+                  </span>
+                  {stateFips ? (
+                    <button
+                      type="button"
+                      onClick={() => setRankingFiltersOpen((v) => !v)}
+                      aria-expanded={rankingFiltersOpen}
+                      aria-controls="ranking-filters-panel"
+                      aria-label={rankingFiltersOpen ? "Hide ranking filters" : "Show ranking filters"}
+                      className={`rounded-lg p-1.5 text-[#8e8e8e] transition hover:bg-[#ebe6df] hover:text-[#5c534c] ${rankingFiltersOpen ? "bg-[#ebe6df] text-[#5c534c]" : ""}`}
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                        />
+                      </svg>
+                    </button>
+                  ) : null}
+                </div>
               </div>
-              <p className="text-[11px] text-nh-brown-muted">{stateLabel}</p>
-              {!stateFips && (
-                <p className="mt-2 text-xs text-nh-brown-muted">Pick a state to load rankings.</p>
-              )}
-              {noData && (
-                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
-                  No tract rows in the database for this state yet.
-                </p>
-              )}
-              <ul className="mt-3 space-y-2">
+
+              {stateFips && rankingFiltersOpen ? (
+                <div
+                  id="ranking-filters-panel"
+                  className="space-y-3 border-b border-[#ebe6df] bg-[#faf8f5] px-4 py-3"
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">
+                    Refine ranking list
+                  </p>
+                  <div>
+                    <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
+                      <span>Rent burden ≥</span>
+                      <span>{draft.minRent}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={draft.minRent}
+                      onChange={(e) => setDraft((d) => ({ ...d, minRent: Number(e.target.value) }))}
+                      className="mt-1 w-full accent-[#b34d3a]"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
+                      <span>Uninsured ≥</span>
+                      <span>{draft.minUninsured}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={50}
+                      value={draft.minUninsured}
+                      onChange={(e) => setDraft((d) => ({ ...d, minUninsured: Number(e.target.value) }))}
+                      className="mt-1 w-full accent-[#b34d3a]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      applyFilters();
+                      setRankingFiltersOpen(false);
+                    }}
+                    className="w-full rounded-xl bg-[#2d2d2d] py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1f1f1f]"
+                  >
+                    Apply filters
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="space-y-0 px-3 pb-3 pt-2">
+                <p className="px-1 text-[11px] text-[#8e8e8e]">{stateLabel}</p>
+                {!stateFips && (
+                  <p className="mt-2 px-1 text-xs leading-relaxed text-[#6b6560]">
+                    Click a state on the map (highlighted) to load tract rankings.
+                  </p>
+                )}
+                {noData && (
+                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
+                    No tract rows in the database for this state yet.
+                  </p>
+                )}
+              </div>
+
+              <ul className="max-h-[min(52vh,28rem)] divide-y divide-[#ebe6df] overflow-y-auto overscroll-contain">
                 {ranked.slice(0, 16).map((r, idx) => {
-                  const pv = previews[r.geoid];
                   const label = r.name ?? `Tract ${r.geoid}`;
                   const inTray = compareTray.includes(r.geoid);
                   const isSel = selectedGeoid === r.geoid;
+                  const score = r.composite_score != null ? Math.round(r.composite_score) : null;
+                  const scoreTone =
+                    score != null
+                      ? score >= 66
+                        ? "bg-[#e8c9a5] text-[#2d2d2d]"
+                        : score >= 33
+                          ? "bg-[#efe0d0] text-[#2d2d2d]"
+                          : "bg-[#f4ebe4] text-[#5c534c]"
+                      : "bg-[#ebe6df] text-[#8e8e8e]";
+                  const secondary = [r.county_name].filter(Boolean).join(" · ") || "—";
                   return (
                     <li
                       key={r.geoid}
-                      className={`flex gap-2 rounded-xl border p-2 transition ${
-                        isSel ? "border-nh-brown bg-white shadow-sm" : "border-nh-brown/10 bg-nh-cream/30 hover:bg-white"
-                      }`}
+                      className={`flex items-center gap-2 px-3 py-2.5 transition ${isSel ? "bg-[#f6e9e4]" : "hover:bg-[#faf6f0]"}`}
                     >
+                      <span className="w-7 shrink-0 text-[11px] tabular-nums text-[#8e8e8e]">
+                        {String(idx + 1).padStart(2, "0")}
+                      </span>
+                      <span
+                        className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums ${scoreTone}`}
+                      >
+                        {score ?? "—"}
+                      </span>
                       <button
                         type="button"
                         onClick={() => onSelectTract(r.geoid)}
                         className="min-w-0 flex-1 text-left"
                       >
-                        <span className="text-[10px] font-mono text-nh-brown-muted">#{idx + 1}</span>
-                        <p className="truncate text-sm font-semibold text-nh-brown">{label}</p>
-                        <p className="truncate text-[11px] text-nh-brown-muted">{r.county_name ?? "—"}</p>
-                        <p className="text-[11px] text-nh-brown-muted">
-                          {pv?.rent != null ? `${Math.round(pv.rent)}% rent` : "—"} ·{" "}
-                          {pv?.uninsured != null ? `${pv.uninsured.toFixed(1)}% uninsured` : "—"}
-                        </p>
+                        <p className="truncate text-sm font-semibold text-[#2d2d2d]">{label}</p>
+                        <p className="truncate text-[11px] text-[#8e8e8e]">{secondary}</p>
                       </button>
-                      <div className="flex shrink-0 flex-col items-center gap-1">
-                        <span className="text-sm font-bold text-nh-terracotta">
-                          {r.composite_score != null ? Math.round(r.composite_score) : "—"}
-                        </span>
-                        <button
-                          type="button"
-                          aria-label={inTray ? "Remove from compare" : "Add to compare"}
-                          onClick={() =>
-                            setCompareTray(inTray ? removeFromCompareTray(r.geoid) : addToCompareTray(r.geoid))
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-full border border-nh-brown/15 text-lg font-medium text-nh-brown hover:bg-nh-cream"
-                        >
-                          {inTray ? "✓" : "+"}
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        aria-label={inTray ? "Remove from compare" : "Add to compare"}
+                        onClick={() =>
+                          setCompareTray(inTray ? removeFromCompareTray(r.geoid) : addToCompareTray(r.geoid))
+                        }
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-base font-semibold transition ${
+                          inTray
+                            ? "bg-[#b34d3a] text-white shadow-sm"
+                            : "border border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/50"
+                        }`}
+                      >
+                        {inTray ? "✓" : "+"}
+                      </button>
                     </li>
                   );
                 })}

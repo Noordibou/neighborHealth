@@ -31,6 +31,7 @@ export type TractSummary = {
   state_fips: string;
   county_fips: string;
   county_name: string | null;
+  place_name: string | null;
   composite_score: number | null;
   year: number | null;
 };

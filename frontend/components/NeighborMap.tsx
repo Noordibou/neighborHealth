@@ -1,6 +1,7 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Source, type MapRef } from "react-map-gl/maplibre";
 import type { Map as MapLibreMap, MapLayerMouseEvent } from "maplibre-gl";
@@ -210,6 +211,11 @@ type Props = {
   selectedGeoid?: string | null;
   /** Tailwind bottom position for the hover card (explore mode; use when a bottom bar covers the map). */
   hoverLegendBottomClassName?: string;
+  /** Explore: Composite / Housing / Health tabs (top-left). */
+  exploreLayerTabs?: ReactNode;
+  /** US overview: state polygons; click a state with data to drill in. */
+  statePickerGeoJSON?: GeoJSON.FeatureCollection | null;
+  onSelectStateFips?: (stateFips: string) => void;
 };
 
 function bboxFromGeoJSON(fc: GeoJSON.FeatureCollection): [[number, number], [number, number]] | null {
@@ -355,6 +361,9 @@ export function NeighborMap({
   showMetricControl = true,
   selectedGeoid = null,
   hoverLegendBottomClassName,
+  exploreLayerTabs = null,
+  statePickerGeoJSON = null,
+  onSelectStateFips,
 }: Props) {
   const mapRef = useRef<MapRef>(null);
   const styleUrl = mapStyle ?? process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? DEFAULT_MAP_STYLE;
@@ -364,6 +373,14 @@ export function NeighborMap({
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const hoveredGeoidRef = useRef<string | null>(null);
   const hasTracts = Boolean(data?.features?.length);
+  const showStatePicker = Boolean(
+    statePickerGeoJSON?.features?.length && typeof onSelectStateFips === "function"
+  );
+
+  const statePickerKey = useMemo(() => {
+    if (!statePickerGeoJSON?.features?.length) return "0";
+    return `${statePickerGeoJSON.features.length}-${statePickerGeoJSON.features[0]?.properties?.state_fips ?? ""}`;
+  }, [statePickerGeoJSON]);
 
   const fillOpacity = 0.78;
   const fillOpacityHover = Math.min(0.95, fillOpacity + 0.08);
@@ -444,10 +461,19 @@ export function NeighborMap({
   const onClick = useCallback(
     (e: MapLayerMouseEvent) => {
       const f = e.features?.[0];
-      const geoid = f?.properties?.geoid as string | undefined;
+      if (!f) return;
+      const layerId = f.layer?.id ?? "";
+      if (layerId === "state-fill") {
+        const p = f.properties as Record<string, unknown> | undefined;
+        const sf = typeof p?.state_fips === "string" ? p.state_fips : "";
+        const ok = p?.nh_has_data === true;
+        if (sf && ok) onSelectStateFips?.(sf);
+        return;
+      }
+      const geoid = f.properties?.geoid as string | undefined;
       if (geoid) onSelectTract?.(geoid);
     },
-    [onSelectTract]
+    [onSelectTract, onSelectStateFips]
   );
 
   const clearHoverFeatureState = useCallback((map: MapLibreMap) => {
@@ -464,7 +490,15 @@ export function NeighborMap({
 
   const onMouseMove = useCallback(
     (e: MapLayerMouseEvent) => {
-      if (!hasTracts) return;
+      if (!hasTracts) {
+        if (showStatePicker && e.features?.[0]?.layer?.id === "state-fill") {
+          const p = e.features[0].properties as Record<string, unknown> | undefined;
+          e.target.getCanvas().style.cursor = p?.nh_has_data === true ? "pointer" : "default";
+        } else if (showStatePicker) {
+          e.target.getCanvas().style.cursor = "";
+        }
+        return;
+      }
       const map = e.target;
       const f = e.features?.[0];
       const props = f?.properties as Record<string, unknown> | undefined;
@@ -489,7 +523,7 @@ export function NeighborMap({
         setHoverInfo(null);
       }
     },
-    [hasTracts, clearHoverFeatureState, effectiveKey]
+    [hasTracts, showStatePicker, clearHoverFeatureState, effectiveKey]
   );
 
   const onMouseLeave = useCallback(
@@ -704,6 +738,30 @@ export function NeighborMap({
     </div>
   );
 
+  const statePickerLegend =
+    showStatePicker && !hasTracts ? (
+      <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">Data coverage</p>
+        <div className="mt-2 flex items-center gap-2 text-[10px] text-nh-brown-muted">
+          <span className="h-3 w-5 shrink-0 rounded-sm bg-[#d4896e]/80 ring-1 ring-nh-brown/15" aria-hidden />
+          Tracts loaded in app
+        </div>
+        <div className="mt-1.5 flex items-center gap-2 text-[10px] text-nh-brown-muted">
+          <span className="h-3 w-5 shrink-0 rounded-sm bg-[#e8dfd6] ring-1 ring-nh-brown/10" aria-hidden />
+          Not available yet
+        </div>
+      </div>
+    ) : null;
+
+  const interactiveLayerIds = useMemo(() => {
+    const ids: string[] = [];
+    if (hasTracts) ids.push("tract-fill");
+    else if (showStatePicker) ids.push("state-fill");
+    return ids;
+  }, [hasTracts, showStatePicker]);
+
+  const mapPointerHandlers = hasTracts || showStatePicker;
+
   const mapEl = (
     <Map
       ref={mapRef}
@@ -711,11 +769,37 @@ export function NeighborMap({
       style={{ width: "100%", height: "100%" }}
       initialViewState={{ longitude: center[0], latitude: center[1], zoom }}
       mapStyle={styleUrl}
-      interactiveLayerIds={hasTracts ? ["tract-fill"] : []}
+      interactiveLayerIds={interactiveLayerIds}
       onClick={onClick}
-      onMouseMove={hasTracts ? onMouseMove : undefined}
-      onMouseLeave={hasTracts ? onMouseLeave : undefined}
+      onMouseMove={mapPointerHandlers ? onMouseMove : undefined}
+      onMouseLeave={mapPointerHandlers ? onMouseLeave : undefined}
     >
+      {showStatePicker && statePickerGeoJSON ? (
+        <Source id="us-states-picker" key={`sp-${statePickerKey}`} type="geojson" data={statePickerGeoJSON} promoteId="state_fips">
+          <Layer
+            id="state-fill"
+            type="fill"
+            paint={{
+              "fill-color": [
+                "case",
+                ["==", ["get", "nh_has_data"], true],
+                "#d4896e",
+                "#e8dfd6",
+              ],
+              "fill-opacity": ["case", ["==", ["get", "nh_has_data"], true], 0.45, 0.18],
+            }}
+          />
+          <Layer
+            id="state-outline"
+            type="line"
+            paint={{
+              "line-color": "#2c1810",
+              "line-width": 0.65,
+              "line-opacity": 0.35,
+            }}
+          />
+        </Source>
+      ) : null}
       {hasTracts && data ? (
         <Source id="tracts" key={`tract-src-${boundsKey}`} type="geojson" data={data} promoteId="geoid">
           <Layer id="tract-fill" type="fill" paint={fillPaint as never} />
@@ -727,16 +811,20 @@ export function NeighborMap({
 
   if (variant === "explore") {
     /* Fill parent flex height; avoid raw 100vh so bottom UI (compare tray) does not clip the map/hover card. */
+    const leftChrome = exploreLayerTabs ?? layerPanel;
+    const rightLegend = showStatePicker && !hasTracts ? statePickerLegend : legend;
     return (
       <div className="relative isolate h-full min-h-[220px] w-full flex-1 overflow-hidden rounded-xl border border-nh-brown/10 bg-nh-sand/40 shadow-inner sm:min-h-[260px]">
-        {layerPanel ? (
-        <div className="pointer-events-none absolute left-3 top-3 z-10 max-h-[70vh] overflow-y-auto">
-          <div className="pointer-events-auto">{layerPanel}</div>
-        </div>
-      ) : null}
-        <div className="pointer-events-none absolute right-3 top-3 z-10">
-          <div className="pointer-events-auto">{legend}</div>
-        </div>
+        {leftChrome ? (
+          <div className="pointer-events-none absolute left-3 top-3 z-10 max-h-[70vh] overflow-y-auto">
+            <div className="pointer-events-auto flex flex-col gap-2">{leftChrome}</div>
+          </div>
+        ) : null}
+        {rightLegend ? (
+          <div className="pointer-events-none absolute right-3 top-3 z-10">
+            <div className="pointer-events-auto">{rightLegend}</div>
+          </div>
+        ) : null}
         {hoverLegend}
         <div className="absolute inset-0 z-0">{mapEl}</div>
       </div>
