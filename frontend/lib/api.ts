@@ -33,24 +33,32 @@ export type TractSummary = {
   county_name: string | null;
   place_name: string | null;
   composite_score: number | null;
+  /** Present on `/api/tracts` list when backend supports `sort_by`; same units as the active layer. */
+  layer_value?: number | null;
   year: number | null;
 };
 
 export type TractDetail = TractSummary & {
   centroid_lat: number | null;
   centroid_lon: number | null;
+  median_rent: number | null;
+  median_household_income: number | null;
   indicators: {
     source: string;
     metric_name: string;
     value: number | null;
+    value_moe: number | null;
     year: number;
     percentile_national: number | null;
     percentile_state: number | null;
+    percentile_county: number | null;
   }[];
   risk_score: {
     composite_score: number;
     component_scores: Record<string, number> | null;
     year: number;
+    rank?: number | null;
+    rank_total?: number | null;
   } | null;
 };
 
@@ -83,9 +91,11 @@ export type IndicatorRow = {
   source: string;
   metric_name: string;
   value: number | null;
+  value_moe: number | null;
   year: number;
   percentile_national: number | null;
   percentile_state: number | null;
+  percentile_county: number | null;
 };
 
 export function getCompare(geoids: string[]) {

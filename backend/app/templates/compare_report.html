@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Tract Comparison Report</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 24px;
+      color: #111111;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 8px 0;
+      color: #111111;
+    }
+    h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 24px 0 10px 0;
+      color: #111111;
+    }
+    h3 {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 0 0 6px 0;
+      color: #111111;
+    }
+    p { margin: 0 0 8px 0; }
+    .muted {
+      color: #555555;
+      font-size: 11px;
+    }
+    .header-block { margin-bottom: 20px; }
+    .methodology {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid #cccccc;
+      background-color: #f7f7f7;
+      color: #333333;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .tract-cards {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .tract-card {
+      border: 1px solid #cccccc;
+      padding: 12px 14px;
+      background-color: #ffffff;
+    }
+    .tract-card__name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #111111;
+      margin-bottom: 4px;
+    }
+    .tract-card__geoid { font-size: 11px; color: #555555; margin-bottom: 10px; }
+    .tract-card__score {
+      font-size: 28px;
+      font-weight: 700;
+      color: #111111;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+    .tract-card__tier {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #333333;
+      margin-bottom: 8px;
+    }
+    .tract-card__meta { font-size: 11px; color: #555555; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #cccccc;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      font-weight: 600;
+      background-color: #eeeeee;
+      color: #111111;
+    }
+    .cell-tract-num { text-align: right; }
+    .cell-metric { font-weight: 600; color: #111111; }
+    .cell-value { font-weight: 700; color: #111111; display: block; }
+    .cell-rank {
+      font-size: 11px;
+      color: #555555;
+      font-weight: 400;
+      margin-top: 2px;
+    }
+    .cell--best {
+      background-color: #e8f4ea;
+    }
+    .insights {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .insight-card {
+      border: 1px solid #cccccc;
+      padding: 12px 14px;
+      background-color: #fafafa;
+    }
+    .insight-card__title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #111111;
+      margin-bottom: 6px;
+    }
+    .insight-card__text { font-size: 12px; color: #333333; margin: 0; }
+    .footer-section {
+      margin-top: 28px;
+      padding-top: 14px;
+      border-top: 1px solid #cccccc;
+    }
+    .footer-brand {
+      font-size: 11px;
+      color: #555555;
+      margin-top: 10px;
+    }
+    @page {
+      margin: 18mm 16mm 22mm 16mm;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: system-ui, sans-serif;
+        font-size: 10px;
+        color: #555555;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header-block">
+    <h1>Tract Comparison Report</h1>
+    <p class="muted">Generated {{ generated_date }}</p>
+    <div class="methodology">
+      Composite scores use equal weights across 7 indicators.
+      National and state percentile ranks shown. Source: ACS 2022 5-year, CDC PLACES 2023.
+    </div>
+  </header>
+
+  <section aria-labelledby="tract-summary-heading">
+    <h2 id="tract-summary-heading">Tract summary</h2>
+    <div class="tract-cards">
+      {% for t in tracts[:4] %}
+      <article class="tract-card">
+        <div class="tract-card__name">{{ t.name }}</div>
+        <div class="tract-card__geoid">GEOID {{ t.geoid }}</div>
+        <div class="tract-card__score">{{ t.composite_score }}</div>
+        <div class="tract-card__tier">{{ t.tier }}</div>
+        <div class="tract-card__meta">
+          Population: {{ t.population }}{% if t.county_name %} · {{ t.county_name }}{% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section aria-labelledby="metrics-heading">
+    <h2 id="metrics-heading">Indicator comparison</h2>
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Metric</th>
+          {% for t in tracts[:4] %}
+          <th scope="col" class="cell-tract-num">{{ t.name or t.geoid }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in metrics %}
+        {% set tract_cells = m.tract_values if m.tract_values is defined else m.tract_cells %}
+        {% set ns = namespace(max_v=none) %}
+        {% for cell in tract_cells %}
+          {% if cell and cell.sort_value is defined %}
+            {% if ns.max_v is none or cell.sort_value > ns.max_v %}
+              {% set ns.max_v = cell.sort_value %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        <tr>
+          <td class="cell-metric">{{ m.display_name or m.name }}</td>
+          {% for cell in tract_cells %}
+          <td class="cell-tract-num{% if cell and cell.sort_value is defined and ns.max_v is not none and cell.sort_value == ns.max_v %} cell--best{% endif %}">
+            {% if cell %}
+            <span class="cell-value">{{ cell.raw }}</span>
+            {% if cell.national_rank is defined and cell.national_rank %}
+            <span class="cell-rank">{{ cell.national_rank }}</span>
+            {% endif %}
+            {% else %}
+            <span class="cell-value">—</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section aria-labelledby="insights-heading">
+    <h2 id="insights-heading">Auto-summary</h2>
+    <div class="insights">
+      {% set gap = insights.get('biggest_gap') if insights else none %}
+      <article class="insight-card">
+        <div class="insight-card__title">
+          {% if gap is mapping and gap.title %}{{ gap.title }}{% else %}Biggest gap{% endif %}
+        </div>
+        <p class="insight-card__text">
+          {% if gap is mapping and gap.text %}{{ gap.text }}{% elif gap is string %}{{ gap }}{% else %}—{% endif %}
+        </p>
+      </article>
+      {% set stress = insights.get('common_stressor') if insights else none %}
+      <article class="insight-card">
+        <div class="insight-card__title">
+          {% if stress is mapping and stress.title %}{{ stress.title }}{% else %}Common stressor{% endif %}
+        </div>
+        <p class="insight-card__text">
+          {% if stress is mapping and stress.text %}{{ stress.text }}{% elif stress is string %}{{ stress }}{% else %}—{% endif %}
+        </p>
+      </article>
+      {% set div = insights.get('divergence') if insights else none %}
+      <article class="insight-card">
+        <div class="insight-card__title">
+          {% if div is mapping and div.title %}{{ div.title }}{% else %}Divergence{% endif %}
+        </div>
+        <p class="insight-card__text">
+          {% if div is mapping and div.text %}{{ div.text }}{% elif div is string %}{{ div }}{% else %}—{% endif %}
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <footer class="footer-section">
+    <h3>Data sources</h3>
+    <p class="muted">
+      CDC PLACES (tract estimates), U.S. Census Bureau ACS 5-year (housing),
+      NeighborHealth composite index. See project README for dataset versions and methodology.
+    </p>
+    <div class="footer-brand">NeighborHealth</div>
+  </footer>
+
+</body>
+</html>

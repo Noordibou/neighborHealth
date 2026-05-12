@@ -60,9 +60,11 @@ async def compare_tracts(
                 source=i.source,
                 metric_name=i.metric_name,
                 value=i.value,
+                value_moe=i.value_moe,
                 year=i.year,
                 percentile_national=i.percentile_national,
                 percentile_state=i.percentile_state,
+                percentile_county=i.percentile_county,
             )
             for i in ind_res.scalars().all()
         ]

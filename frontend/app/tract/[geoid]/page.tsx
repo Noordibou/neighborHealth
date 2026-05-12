@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { AISummaryPanel } from "@/components/AISummaryPanel";
+import { DemographicsPanel } from "@/components/DemographicsPanel";
 import { ScorecardActions } from "@/components/ScorecardActions";
 import { SiteFooter } from "@/components/SiteFooter";
 import { TractMapBackControl } from "@/components/TractMapBackControl";
@@ -88,19 +89,40 @@ export default async function TractPage({ params }: Props) {
           <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown-muted">
             GEOID {tract.geoid}
           </span>
+          {tract.median_rent != null ? (
+            <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium">
+              <span className="text-nh-brown-muted">Median rent</span>{" "}
+              <span className="text-nh-brown">
+                ${Math.round(tract.median_rent).toLocaleString("en-US")} / mo
+              </span>
+            </span>
+          ) : null}
+          {tract.median_household_income != null ? (
+            <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium">
+              <span className="text-nh-brown-muted">Median income</span>{" "}
+              <span className="text-nh-brown">${Math.round(tract.median_household_income).toLocaleString("en-US")}</span>
+            </span>
+          ) : null}
         </div>
 
         <div className="mt-6 flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 flex-1 flex-col gap-6 sm:flex-row sm:items-start">
             {scoreRounded != null && (
-              <div
-                className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
-                aria-label={`Composite score ${scoreRounded}`}
-              >
-                <div className="text-center">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
-                  <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
+              <div className="flex shrink-0 flex-col items-center gap-2 sm:items-start">
+                <div
+                  className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
+                  aria-label={`Composite score ${scoreRounded}`}
+                >
+                  <div className="text-center">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
+                    <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
+                  </div>
                 </div>
+                {tract.risk_score?.rank != null && tract.risk_score.rank_total != null ? (
+                  <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left md:ml-6">
+                    Rank {tract.risk_score.rank} / {tract.risk_score.rank_total}
+                  </p>
+                ) : null}
               </div>
             )}
             <div className="min-w-0">
@@ -123,11 +145,15 @@ export default async function TractPage({ params }: Props) {
 
         <section className="mt-12">
           <h2 className="font-display text-xl font-semibold text-nh-brown">Indicator scorecard</h2>
-          <p className="mt-1 text-sm text-nh-brown-muted">Tract values with state and national percentile context.</p>
+          <p className="mt-1 text-sm text-nh-brown-muted">
+            Tract values with county, state, and national percentile context.
+          </p>
           <div className="mt-4">
             <TractScorecardTable tract={tract} />
           </div>
         </section>
+
+        <DemographicsPanel geoid={tract.geoid} />
 
         <section className="mt-12">
           <h2 className="font-display text-xl font-semibold text-nh-brown">Metric cards</h2>

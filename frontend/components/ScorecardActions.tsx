@@ -5,10 +5,17 @@ import { useState } from "react";
 import { addToCompareTray, readCompareTray } from "@/lib/compareTray";
 import { postPdfExport } from "@/lib/api";
 
+function clientApiBase(): string {
+  const t = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").trim().replace(/\/+$/, "");
+  return t || "http://localhost:8000";
+}
+
 export function ScorecardActions({ geoid, apiBase }: { geoid: string; apiBase: string }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [compareHint, setCompareHint] = useState<string | null>(null);
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [csvErr, setCsvErr] = useState<string | null>(null);
 
   async function onPdf() {
     setMsg(null);
@@ -18,6 +25,39 @@ export function ScorecardActions({ geoid, apiBase }: { geoid: string; apiBase: s
       window.open(url, "_blank");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "PDF failed");
+    }
+  }
+
+  async function onExportCsv() {
+    const g = geoid.trim();
+    if (g.length !== 11) return;
+    setCsvErr(null);
+    setCsvLoading(true);
+    try {
+      const res = await fetch(`${clientApiBase()}/api/export/tract-csv`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ geoid: g }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Request failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `neighborhealth-tract-${g}.csv`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setCsvErr(e instanceof Error ? e.message : "CSV export failed");
+    } finally {
+      setCsvLoading(false);
     }
   }
 
@@ -75,18 +115,21 @@ export function ScorecardActions({ geoid, apiBase }: { geoid: string; apiBase: s
         </button>
         <button
           type="button"
+          onClick={() => void onExportCsv()}
+          disabled={csvLoading}
+          className="rounded-full border border-nh-brown/20 bg-white px-4 py-2.5 text-sm font-semibold text-nh-brown shadow-sm hover:bg-nh-cream disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {csvLoading ? "Exporting…" : "Export CSV"}
+        </button>
+        <button
+          type="button"
           onClick={onPdf}
           className="rounded-full bg-nh-brown px-5 py-2.5 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
         >
           Report PDF ↓
         </button>
       </div>
-      <a
-        className="text-right text-sm font-medium text-nh-terracotta hover:underline"
-        href={`${apiBase}/api/export/tracts.csv`}
-      >
-        CSV export (all tracts)
-      </a>
+      {csvErr ? <p className="text-right text-sm text-red-600">{csvErr}</p> : null}
       {msg && <p className="text-right text-sm text-red-600">{msg}</p>}
       {copyMsg && <p className="text-right text-sm text-nh-brown-muted">{copyMsg}</p>}
       {compareHint && <p className="text-right text-sm text-nh-brown-muted">{compareHint}</p>}

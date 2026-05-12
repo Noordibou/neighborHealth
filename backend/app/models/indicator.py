@@ -16,9 +16,11 @@ class Indicator(Base):
     source: Mapped[str] = mapped_column(String(64), index=True)
     metric_name: Mapped[str] = mapped_column(String(128), index=True)
     value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    value_moe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     year: Mapped[int] = mapped_column(Integer, index=True)
     percentile_national: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     percentile_state: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    percentile_county: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     tract = relationship("Tract", back_populates="indicators")
 

@@ -1,10 +1,11 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Source, type MapRef } from "react-map-gl/maplibre";
 import type { Map as MapLibreMap, MapLayerMouseEvent } from "maplibre-gl";
+import { getExploreBrowsePlaceholderView } from "@/lib/exploreMapPlaceholder";
 
 /**
  * Vector basemap (roads, labels, landcover) without an API key.
@@ -216,6 +217,10 @@ type Props = {
   /** US overview: state polygons; click a state with data to drill in. */
   statePickerGeoJSON?: GeoJSON.FeatureCollection | null;
   onSelectStateFips?: (stateFips: string) => void;
+  /** Explore dashboard: expose MapRef for programmatic camera / URL sync. */
+  exploreMapRef?: MutableRefObject<MapRef | null>;
+  /** Explore: fired after pan/zoom settles (debounced in parent for URL). */
+  onExploreMapMoveEnd?: (view: { lng: number; lat: number; zoom: number }) => void;
 };
 
 function bboxFromGeoJSON(fc: GeoJSON.FeatureCollection): [[number, number], [number, number]] | null {
@@ -364,8 +369,21 @@ export function NeighborMap({
   exploreLayerTabs = null,
   statePickerGeoJSON = null,
   onSelectStateFips,
+  exploreMapRef,
+  onExploreMapMoveEnd,
 }: Props) {
   const mapRef = useRef<MapRef>(null);
+
+  if (exploreMapRef) {
+    exploreMapRef.current = mapRef.current;
+  }
+
+  useEffect(() => {
+    if (!exploreMapRef) return;
+    return () => {
+      exploreMapRef.current = null;
+    };
+  }, [exploreMapRef]);
   const styleUrl = mapStyle ?? process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? DEFAULT_MAP_STYLE;
 
   const [colorBy, setColorBy] = useState<string>("composite_score");
@@ -537,18 +555,11 @@ export function NeighborMap({
 
   const center = useMemo(() => {
     if (stateFips == null) return [-98, 39] as [number, number];
-    const c: Record<string, [number, number]> = {
-      "06": [-119, 37],
-      "12": [-81.5, 27.5],
-      "17": [-89, 40],
-      "36": [-75, 43],
-      "42": [-77.6, 41.0],
-      "48": [-99, 31],
-    };
-    return c[stateFips] ?? [-98, 39];
+    const v = getExploreBrowsePlaceholderView(stateFips);
+    return [v.lng, v.lat] as [number, number];
   }, [stateFips]);
 
-  const zoom = stateFips == null ? 3.5 : stateFips === "06" ? 5.5 : stateFips === "42" ? 7 : 6;
+  const zoom = stateFips == null ? 3.5 : getExploreBrowsePlaceholderView(stateFips).zoom;
 
   const boundsKey = useMemo(() => {
     if (!data?.features?.length) return "0";
@@ -558,7 +569,14 @@ export function NeighborMap({
   }, [data]);
 
   useEffect(() => {
-    if (!fitBoundsToData || !data?.features?.length) return;
+    const isSearchFit = fitBoundsToData && Boolean(data?.features?.length);
+    const isBrowseExploreFit =
+      variant === "explore" &&
+      !fitBoundsToData &&
+      Boolean(data?.features?.length) &&
+      stateFips != null;
+    if (!isSearchFit && !isBrowseExploreFit) return;
+    if (!data?.features?.length) return;
     const raw = bboxFromGeoJSON(data);
     if (!raw) return;
     let [[west, south], [east, north]] = raw;
@@ -622,7 +640,7 @@ export function NeighborMap({
       cancelAnimationFrame(raf);
       window.clearTimeout(fallback);
     };
-  }, [fitBoundsToData, data, boundsKey, zoomToResultsKey]);
+  }, [fitBoundsToData, data, boundsKey, zoomToResultsKey, variant, stateFips]);
 
   useEffect(() => {
     hoveredGeoidRef.current = null;
@@ -773,6 +791,16 @@ export function NeighborMap({
       onClick={onClick}
       onMouseMove={mapPointerHandlers ? onMouseMove : undefined}
       onMouseLeave={mapPointerHandlers ? onMouseLeave : undefined}
+      onMoveEnd={
+        onExploreMapMoveEnd
+          ? (e) =>
+              onExploreMapMoveEnd({
+                lng: e.viewState.longitude,
+                lat: e.viewState.latitude,
+                zoom: e.viewState.zoom,
+              })
+          : undefined
+      }
     >
       {showStatePicker && statePickerGeoJSON ? (
         <Source id="us-states-picker" key={`sp-${statePickerKey}`} type="geojson" data={statePickerGeoJSON} promoteId="state_fips">

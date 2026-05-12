@@ -1,10 +1,45 @@
 import { METRIC_KEYS, type MetricKey } from "@/lib/riskScore";
 import { METRIC_LABELS } from "@/lib/metricDisplay";
 
+/** Min normalized (0–100) spread on any single metric to show divergence copy vs. fallback. */
+export const DIVERGENCE_THRESHOLD = 25;
+
 type SeriesRow = Record<string, number | string>;
 
+/** Optional median income per GEOID for Common stressor copy (from tract detail + compare page). */
+export type CompareDemographicsIncomeMap = Record<string, { median_household_income: number | null } | null>;
+
+function appendCommonStressorIncomeContext(
+  series: SeriesRow[],
+  demographicsMap: CompareDemographicsIncomeMap
+): string {
+  if (!series.length) return "";
+  const incomes: number[] = [];
+  for (const s of series) {
+    const gid = String(s.geoid ?? "");
+    if (!gid) return "";
+    const row = demographicsMap[gid];
+    if (!row || row.median_household_income == null || !Number.isFinite(row.median_household_income)) {
+      return "";
+    }
+    incomes.push(row.median_household_income);
+  }
+  const maxIncome = Math.max(...incomes);
+  const minIncome = Math.min(...incomes);
+  if (maxIncome >= 80000) return "";
+  if (maxIncome < 50000) {
+    return " Median household incomes are all below $50k — rent burden likely represents a survival-level cost pressure.";
+  }
+  const fmt = (n: number) =>
+    `$${Math.round(n).toLocaleString("en-US", { maximumFractionDigits: 0, useGrouping: true })}`;
+  return ` Median household incomes range from ${fmt(minIncome)} to ${fmt(maxIncome)} — cost burden varies in severity across these tracts.`;
+}
+
 /** Heuristic narrative cards from compare `series` (component scores 0–100 per metric). */
-export function buildCompareInsights(series: SeriesRow[]): { title: string; body: string }[] {
+export function buildCompareInsights(
+  series: SeriesRow[],
+  demographicsMap: CompareDemographicsIncomeMap = {}
+): { title: string; body: string }[] {
   if (series.length < 2) return [];
 
   let biggest: { metric: MetricKey; gap: number; loLabel: string; hiLabel: string } | null = null;
@@ -46,12 +81,14 @@ export function buildCompareInsights(series: SeriesRow[]): { title: string; body
     });
   }
   if (common.length) {
+    let body = `Every tract here scores above the midrange on ${common
+      .slice(0, 2)
+      .map((m) => METRIC_LABELS[m])
+      .join(" and ")}.`;
+    body += appendCommonStressorIncomeContext(series, demographicsMap);
     cards.push({
       title: "Common stressor",
-      body: `Every tract here scores above the midrange on ${common
-        .slice(0, 2)
-        .map((m) => METRIC_LABELS[m])
-        .join(" and ")}.`,
+      body,
     });
   } else {
     cards.push({
@@ -60,18 +97,17 @@ export function buildCompareInsights(series: SeriesRow[]): { title: string; body
     });
   }
 
-  const spread = METRIC_KEYS.find((m) => {
-    const nums = series.map((s) => s[m]).filter((v): v is number => typeof v === "number");
-    if (nums.length < 2) return false;
-    return Math.max(...nums) - Math.min(...nums) >= 40;
-  });
-
-  cards.push({
-    title: "Divergence",
-    body: spread
-      ? `${METRIC_LABELS[spread]} shows the widest spread in this comparison—worth a deeper tract-level read.`
-      : "Scores are relatively clustered; open individual tract pages for raw percentages and citations.",
-  });
+  if (biggest && biggest.gap >= DIVERGENCE_THRESHOLD) {
+    cards.push({
+      title: "Divergence",
+      body: `${METRIC_LABELS[biggest.metric]}: ${biggest.loLabel} and ${biggest.hiLabel} show the largest divergence — a ${Math.round(biggest.gap)}-point gap on the normalized scale.`,
+    });
+  } else {
+    cards.push({
+      title: "Divergence",
+      body: "No single indicator drives the gap — burdens are distributed across metrics. See individual tract profiles for full breakdowns.",
+    });
+  }
 
   return cards.slice(0, 3);
 }

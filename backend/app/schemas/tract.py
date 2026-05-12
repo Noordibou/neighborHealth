@@ -9,9 +9,11 @@ class IndicatorOut(BaseModel):
     source: str
     metric_name: str
     value: float | None
+    value_moe: float | None = None
     year: int
     percentile_national: float | None = None
     percentile_state: float | None = None
+    percentile_county: float | None = None
 
 
 class RiskScoreOut(BaseModel):
@@ -21,6 +23,8 @@ class RiskScoreOut(BaseModel):
     component_scores: dict[str, float] | None = None
     weights_used: dict[str, float] | None = None
     computed_at: str | None = None
+    rank: int | None = None
+    rank_total: int | None = None
 
 
 class TractSummary(BaseModel):
@@ -33,13 +37,34 @@ class TractSummary(BaseModel):
     urban_rural: str | None = None
     composite_score: float | None = None
     year: int | None = None
+    #: Value for the active map/list layer (composite score, rent burden %, or health blend); mirrors choropleth `nh_map_value`.
+    layer_value: float | None = None
 
 
 class TractDetail(TractSummary):
     centroid_lat: float | None = None
     centroid_lon: float | None = None
+    median_rent: float | None = None
+    median_household_income: float | None = None
     indicators: list[IndicatorOut] = Field(default_factory=list)
     risk_score: RiskScoreOut | None = None
+
+
+class TractDemographics(BaseModel):
+    """ACS-derived demographics row for a tract (latest year)."""
+
+    geoid: str
+    year: int
+    total_population: float | None = None
+    median_age: float | None = None
+    pct_white: float | None = None
+    pct_black: float | None = None
+    pct_hispanic: float | None = None
+    pct_asian: float | None = None
+    pct_other_race: float | None = None
+    pct_non_english_home: float | None = None
+    pct_foreign_born: float | None = None
+    pct_no_hs_diploma: float | None = None
 
 
 class TractListResponse(BaseModel):

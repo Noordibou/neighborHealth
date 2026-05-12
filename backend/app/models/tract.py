@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import Float, Index, String, Text
+from sqlalchemy import Boolean, Float, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from geoalchemy2 import Geometry
 
@@ -21,12 +21,19 @@ class Tract(Base):
     urban_rural: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     centroid_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     centroid_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    median_rent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    median_household_income: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    population: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    is_institutional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     geometry: Mapped[object] = mapped_column(
         Geometry(geometry_type="MULTIPOLYGON", srid=4326, spatial_index=False),
         nullable=True,
     )
 
     indicators = relationship("Indicator", back_populates="tract", cascade="all, delete-orphan")
+    demographics = relationship(
+        "TractDemographics", back_populates="tract", cascade="all, delete-orphan"
+    )
     risk_scores = relationship("RiskScore", back_populates="tract", cascade="all, delete-orphan")
     ai_summary = relationship("AISummary", back_populates="tract", uselist=False, cascade="all, delete-orphan")
 

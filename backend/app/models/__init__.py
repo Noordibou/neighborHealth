@@ -1,4 +1,5 @@
 from app.models.ai_summary import AISummary
+from app.models.demographics import TractDemographics
 from app.models.indicator import Indicator
 from app.models.risk_score import RiskScore
 from app.models.saved_view import SavedView
@@ -11,5 +12,6 @@ __all__ = [
     "RiskScore",
     "SavedView",
     "Tract",
+    "TractDemographics",
     "User",
 ]

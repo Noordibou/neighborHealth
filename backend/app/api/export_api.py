@@ -3,17 +3,19 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from typing import Annotated
+from collections import defaultdict
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import and_, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import RiskScore, Tract
+from app.models import Indicator, RiskScore, Tract, TractDemographics
 from app.services.pdf_export import build_pdf_bytes, write_temp_pdf
+from app.services.risk_score import METRIC_KEYS
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -23,10 +25,282 @@ class PDFBody(BaseModel):
     year: int | None = None
 
 
+class CompareCSVBody(BaseModel):
+    """2–4 tract GEOIDs for server-side compare CSV export."""
+
+    geoids: list[str] = Field(..., min_length=2, max_length=4)
+
+    @field_validator("geoids")
+    @classmethod
+    def validate_geoids(cls, v: list[str]) -> list[str]:
+        out = [g.strip() for g in v if g and str(g).strip()]
+        if len(out) < 2 or len(out) > 4:
+            raise ValueError("Provide between 2 and 4 GEOIDs")
+        for g in out:
+            if len(g) != 11 or not g.isdigit():
+                raise ValueError("Each GEOID must be an 11-digit string")
+        return out
+
+
+class TractCSVBody(BaseModel):
+    """Single tract GEOID — same wide CSV columns as compare export."""
+
+    geoid: str = Field(..., min_length=11, max_length=11)
+
+    @field_validator("geoid")
+    @classmethod
+    def validate_geoid(cls, v: str) -> str:
+        g = v.strip()
+        if len(g) != 11 or not g.isdigit():
+            raise ValueError("GEOID must be an 11-digit string")
+        return g
+
+
 class PDFJobResponse(BaseModel):
     job_id: str
     message: str
     download_url: str
+
+
+def _expanded_csv_headers() -> list[str]:
+    cols = ["geoid", "name", "state_fips", "county_name", "year", "composite_score"]
+    for m in METRIC_KEYS:
+        cols.extend([m, f"{m}_national_pctile", f"{m}_state_pctile"])
+    cols.extend(["median_rent", "median_household_income", "population"])
+    return cols
+
+
+def _csv_missing(v: Any) -> bool:
+    if v is None:
+        return True
+    if isinstance(v, float) and v != v:
+        return True
+    return False
+
+
+def _fmt_metric_value(v: Any) -> str:
+    """Metric raw values (incl. % metrics, heat index): 2 decimal places."""
+    if _csv_missing(v):
+        return ""
+    return f"{float(v):.2f}"
+
+
+def _fmt_percentile_rank(v: Any) -> str:
+    """National / state percentile columns: 1 decimal place."""
+    if _csv_missing(v):
+        return ""
+    return f"{float(v):.1f}"
+
+
+def _fmt_composite(v: Any) -> str:
+    if _csv_missing(v):
+        return ""
+    return f"{float(v):.1f}"
+
+
+def _fmt_int_field(v: Any) -> str:
+    """Median rent, median household income, population: nearest integer, no decimals."""
+    if _csv_missing(v):
+        return ""
+    return str(int(round(float(v))))
+
+
+def _tract_population(tract: Tract, population_fallback: float | None) -> float | None:
+    if tract.population is not None and not _csv_missing(tract.population):
+        return float(tract.population)
+    return population_fallback
+
+
+def _csv_state_fips(tract: Tract) -> str:
+    """Two-digit state FIPS for CSV (e.g. Alaska → '02')."""
+    return str(tract.state_fips).zfill(2)
+
+
+def _expanded_csv_row(
+    tract: Tract,
+    composite_score: float | None,
+    year_eff: int,
+    ind_by_geoid: dict[str, dict[str, dict[str, Any]]],
+    population_fallback: float | None,
+) -> list[str]:
+    im = ind_by_geoid.get(tract.geoid, {})
+    pop = _tract_population(tract, population_fallback)
+    row: list[str] = [
+        tract.geoid,
+        tract.name or "",
+        _csv_state_fips(tract),
+        tract.county_name or "",
+        str(year_eff),
+        _fmt_composite(composite_score),
+    ]
+    for m in METRIC_KEYS:
+        cell = im.get(m, {})
+        row.append(_fmt_metric_value(cell.get("value")))
+        row.append(_fmt_percentile_rank(cell.get("pct_nat")))
+        row.append(_fmt_percentile_rank(cell.get("pct_st")))
+    row.append(_fmt_int_field(tract.median_rent))
+    row.append(_fmt_int_field(tract.median_household_income))
+    row.append(_fmt_int_field(pop))
+    return row
+
+
+async def _indicator_maps_by_geoid(
+    session: AsyncSession, geoids: list[str], year_eff: int
+) -> dict[str, dict[str, dict[str, Any]]]:
+    if not geoids:
+        return {}
+    out: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    q = await session.execute(
+        select(Indicator).where(
+            Indicator.geoid.in_(geoids),
+            Indicator.year == year_eff,
+            Indicator.metric_name.in_(METRIC_KEYS),
+        )
+    )
+    for row in q.scalars():
+        out[row.geoid][row.metric_name] = {
+            "value": row.value,
+            "pct_nat": row.percentile_national,
+            "pct_st": row.percentile_state,
+        }
+    return dict(out)
+
+
+async def _latest_risk_year_score_by_geoid(
+    session: AsyncSession, geoids: list[str]
+) -> dict[str, tuple[int, float | None]]:
+    """Latest (max year) risk score row per GEOID among requested geoids."""
+    if not geoids:
+        return {}
+    subq = (
+        select(RiskScore.geoid, func.max(RiskScore.year).label("yr"))
+        .where(RiskScore.geoid.in_(geoids))
+        .group_by(RiskScore.geoid)
+    ).subquery()
+    q = await session.execute(
+        select(RiskScore.geoid, RiskScore.year, RiskScore.composite_score).join(
+            subq,
+            and_(RiskScore.geoid == subq.c.geoid, RiskScore.year == subq.c.yr),
+        )
+    )
+    out: dict[str, tuple[int, float | None]] = {}
+    for geoid, yr, score in q.all():
+        out[str(geoid)] = (int(yr), float(score) if score is not None else None)
+    return out
+
+
+async def _indicator_maps_for_geoid_year_pairs(
+    session: AsyncSession, geoid_year_pairs: list[tuple[str, int]]
+) -> dict[str, dict[str, dict[str, Any]]]:
+    if not geoid_year_pairs:
+        return {}
+    out: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    q = await session.execute(
+        select(Indicator).where(
+            tuple_(Indicator.geoid, Indicator.year).in_(geoid_year_pairs),
+            Indicator.metric_name.in_(METRIC_KEYS),
+        )
+    )
+    for row in q.scalars():
+        out[row.geoid][row.metric_name] = {
+            "value": row.value,
+            "pct_nat": row.percentile_national,
+            "pct_st": row.percentile_state,
+        }
+    return dict(out)
+
+
+async def _population_by_geoid(session: AsyncSession, geoids: list[str]) -> dict[str, float | None]:
+    if not geoids:
+        return {}
+    q = await session.execute(
+        select(TractDemographics)
+        .where(TractDemographics.geoid.in_(geoids))
+        .order_by(TractDemographics.geoid, TractDemographics.year.desc())
+    )
+    out: dict[str, float | None] = {}
+    for d in q.scalars():
+        if d.geoid not in out:
+            out[d.geoid] = d.total_population
+    return out
+
+
+async def _year_eff(session: AsyncSession, year: int | None) -> int:
+    if year is not None:
+        return year
+    yq = await session.execute(select(func.max(RiskScore.year)))
+    return yq.scalar() or 2023
+
+
+async def _build_expanded_tract_csv_string(session: AsyncSession, ordered_geoids: list[str]) -> str:
+    """Wide-format CSV (header + one row per GEOID in order). Raises HTTPException on missing data."""
+    if not ordered_geoids:
+        return ""
+    risk_by_geoid = await _latest_risk_year_score_by_geoid(session, ordered_geoids)
+    missing_risk = [g for g in ordered_geoids if g not in risk_by_geoid]
+    if missing_risk:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No risk_scores row for GEOID(s): {', '.join(missing_risk)}",
+        )
+
+    tr_res = await session.execute(select(Tract).where(Tract.geoid.in_(ordered_geoids)))
+    tract_by_geoid = {t.geoid: t for t in tr_res.scalars().all()}
+    missing_tract = [g for g in ordered_geoids if g not in tract_by_geoid]
+    if missing_tract:
+        raise HTTPException(status_code=404, detail=f"Tract not found: {', '.join(missing_tract)}")
+
+    pairs = [(g, risk_by_geoid[g][0]) for g in ordered_geoids]
+    ind_by_geoid = await _indicator_maps_for_geoid_year_pairs(session, pairs)
+    pop_fallback = await _population_by_geoid(session, ordered_geoids)
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(_expanded_csv_headers())
+    for gid in ordered_geoids:
+        tract = tract_by_geoid[gid]
+        year_g, score = risk_by_geoid[gid]
+        w.writerow(
+            _expanded_csv_row(
+                tract,
+                score,
+                year_g,
+                ind_by_geoid,
+                pop_fallback.get(gid),
+            )
+        )
+    buf.seek(0)
+    return buf.getvalue().rstrip("\r\n")
+
+
+@router.post("/compare-csv")
+async def export_compare_csv(
+    body: CompareCSVBody,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StreamingResponse:
+    """Analyst-ready wide CSV: one row per tract, metrics + percentiles + tract context."""
+    ordered_geoids = list(body.geoids)
+    csv_str = await _build_expanded_tract_csv_string(session, ordered_geoids)
+    return StreamingResponse(
+        iter([csv_str]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="neighborhealth-compare.csv"'},
+    )
+
+
+@router.post("/tract-csv")
+async def export_tract_csv(
+    body: TractCSVBody,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StreamingResponse:
+    """Same wide CSV as compare export, single tract row."""
+    gid = body.geoid
+    csv_str = await _build_expanded_tract_csv_string(session, [gid])
+    return StreamingResponse(
+        iter([csv_str]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="neighborhealth-tract-{gid}.csv"'},
+    )
 
 
 @router.post("/pdf", response_model=PDFJobResponse)
@@ -58,10 +332,7 @@ async def export_tracts_csv(
     year: int | None = None,
 ) -> StreamingResponse:
     """CSV export of filtered tracts (same filters as GET /api/tracts)."""
-    year_eff = year
-    if year_eff is None:
-        yq = await session.execute(select(func.max(RiskScore.year)))
-        year_eff = yq.scalar() or 2023
+    year_eff = await _year_eff(session, year)
 
     stmt = (
         select(Tract, RiskScore.composite_score)
@@ -74,23 +345,22 @@ async def export_tracts_csv(
         stmt = stmt.where(RiskScore.composite_score >= min_score)
 
     res = await session.execute(stmt)
+    rows = list(res.all())
+    geoids = [t.geoid for t, _ in rows]
+    ind_by_geoid = await _indicator_maps_by_geoid(session, geoids, year_eff)
+    pop_by_geoid = await _population_by_geoid(session, geoids)
+
     buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["geoid", "name", "state_fips", "county_name", "composite_score", "year"])
-    for tract, score in res.all():
+    w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(_expanded_csv_headers())
+    for tract, score in rows:
         w.writerow(
-            [
-                tract.geoid,
-                tract.name or "",
-                tract.state_fips,
-                tract.county_name or "",
-                f"{float(score):.4f}" if score is not None else "",
-                year_eff,
-            ]
+            _expanded_csv_row(tract, score, year_eff, ind_by_geoid, pop_by_geoid.get(tract.geoid))
         )
     buf.seek(0)
+    csv_body = buf.getvalue().rstrip("\r\n")
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        iter([csv_body]),
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="tracts.csv"'},
     )

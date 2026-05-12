@@ -79,6 +79,7 @@ Default sample states: **CA, FL, IL, NY, TX** (FIPS `06,12,17,36,48`).
 cd backend
 source .venv/bin/activate
 python ingest.py --states 06,12,17,36,48
+docker compose exec backend sh -c "cd /app && python ingest.py --states 06,12,17,36,48"
 ```
 
 - Idempotent: re-run to refresh data for those states (same analysis year).

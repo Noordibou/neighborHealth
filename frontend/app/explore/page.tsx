@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import type { MapRef } from "react-map-gl/maplibre";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrandWordmark } from "@/components/BrandMark";
 import { NeighborMap } from "@/components/NeighborMap";
 import {
@@ -26,6 +27,7 @@ import {
   parseExploreMapSession,
   serializeExploreMapSession,
 } from "@/lib/exploreMapSession";
+import { isExploreBrowsePlaceholderViewport } from "@/lib/exploreMapPlaceholder";
 import { augmentGeoJSONForMap, type MapLayerMode } from "@/lib/mapGeojson";
 
 const STATE_ABBR: Record<string, string> = {
@@ -44,10 +46,122 @@ function mapFillLabel(mode: MapLayerMode): string {
 }
 
 const TOP_TRACT_LAYER_HEADING: Record<MapLayerMode, string> = {
-  composite: "COMPOSITE",
-  housing: "HOUSING",
-  health: "HEALTH",
+  composite: "Composite index",
+  housing: "Rent burden",
+  health: "Health blend",
 };
+
+const TOP_TRACT_SORT_HINT: Record<MapLayerMode, string> = {
+  composite: "Sorted by composite housing–health score (highest first).",
+  housing: "Sorted by rent burden % (highest first).",
+  health: "Sorted by average of uninsured %, asthma %, and disability % (highest first).",
+};
+
+function priorityFlagCopy(mode: MapLayerMode): string {
+  if (mode === "composite") return "flagged priority (index ≥ 50)";
+  if (mode === "housing") return "flagged priority (rent burden ≥ 50%)";
+  return "flagged priority (health blend ≥ 50)";
+}
+
+const LAYER_SORT_API: Record<MapLayerMode, "composite" | "housing" | "health"> = {
+  composite: "composite",
+  housing: "housing",
+  health: "health",
+};
+
+function paramsEqual(a: URLSearchParams, b: URLSearchParams): boolean {
+  const keys = new Set<string>();
+  a.forEach((_, k) => {
+    keys.add(k);
+  });
+  b.forEach((_, k) => {
+    keys.add(k);
+  });
+  for (const k of Array.from(keys)) {
+    if (a.get(k) !== b.get(k)) return false;
+  }
+  return true;
+}
+
+function parseExploreUrl(search: string): {
+  tract: string | null;
+  layer: MapLayerMode | null;
+  minRent: number | null;
+  minUninsured: number | null;
+  scoreMin: number | undefined;
+  popMin: number | undefined;
+  exclInst: boolean | undefined;
+  viewport: { lat: number; lng: number; zoom: number } | null;
+} {
+  const p = new URLSearchParams(search);
+  const tractRaw = p.get("tract")?.trim();
+  const tract = tractRaw && /^\d{11}$/.test(tractRaw) ? tractRaw : null;
+  const lr = p.get("layer")?.toLowerCase();
+  const layer: MapLayerMode | null =
+    lr === "housing" || lr === "health" || lr === "composite" ? (lr as MapLayerMode) : null;
+  const rentN = Number(p.get("f_rent"));
+  const minRent =
+    Number.isFinite(rentN) && rentN >= 0 && rentN <= 100 ? Math.round(rentN) : null;
+  const uniN = Number(p.get("f_uninsured"));
+  const minUninsured =
+    Number.isFinite(uniN) && uniN >= 0 && uniN <= 50 ? Math.round(uniN) : null;
+  let scoreMin: number | undefined;
+  if (p.has("score_min")) {
+    const sc = Number(p.get("score_min"));
+    if (Number.isFinite(sc) && sc >= 0 && sc <= 100) scoreMin = Math.round(sc);
+  }
+  const POP_MIN_OPTS = new Set([0, 500, 1000, 2500, 5000]);
+  let popMin: number | undefined;
+  if (p.has("pop_min")) {
+    const pn = Number(p.get("pop_min"));
+    if (Number.isFinite(pn) && POP_MIN_OPTS.has(Math.round(pn))) popMin = Math.round(pn);
+  }
+  let exclInst: boolean | undefined;
+  if (p.has("excl_inst")) {
+    const raw = p.get("excl_inst")?.toLowerCase() ?? "";
+    exclInst = raw === "1" || raw === "true";
+  }
+  const lat = Number(p.get("lat"));
+  const lng = Number(p.get("lng"));
+  const zoom = Number(p.get("zoom"));
+  const viewport =
+    Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+    Number.isFinite(lng) && lng >= -180 && lng <= 180 &&
+    Number.isFinite(zoom) && zoom >= 0 && zoom <= 22
+      ? { lat, lng, zoom }
+      : null;
+  return { tract, layer, minRent, minUninsured, scoreMin, popMin, exclInst, viewport };
+}
+
+function buildExploreUrlParams(opts: {
+  qParam: string | null | undefined;
+  stateFips: string | null;
+  selectedGeoid: string | null;
+  layerMode: MapLayerMode;
+  appliedMinScore: number;
+  appliedMinPopulation: number;
+  appliedExcludeInstitutional: boolean;
+  appliedMinRent: number;
+  appliedMinUninsured: number;
+  viewport: { lng: number; lat: number; zoom: number } | null;
+}): URLSearchParams {
+  const p = new URLSearchParams();
+  if (opts.qParam) p.set("q", opts.qParam);
+  if (opts.stateFips) p.set("state", opts.stateFips.padStart(2, "0").slice(0, 2));
+  if (opts.selectedGeoid) p.set("tract", opts.selectedGeoid);
+  if (opts.layerMode !== "composite") p.set("layer", opts.layerMode);
+  if (opts.appliedMinScore > 0) p.set("score_min", String(opts.appliedMinScore));
+  if (opts.appliedMinPopulation > 0) p.set("pop_min", String(opts.appliedMinPopulation));
+  if (opts.appliedExcludeInstitutional) p.set("excl_inst", "1");
+  if (opts.appliedMinRent > 0) p.set("f_rent", String(opts.appliedMinRent));
+  if (opts.appliedMinUninsured > 0) p.set("f_uninsured", String(opts.appliedMinUninsured));
+  if (opts.viewport) {
+    p.set("lat", opts.viewport.lat.toFixed(4));
+    p.set("lng", opts.viewport.lng.toFixed(4));
+    p.set("zoom", opts.viewport.zoom.toFixed(1));
+  }
+  return p;
+}
 
 /** Sidebar indicator bars — matches tract detail `metric_name` keys */
 const SIDEBAR_METRICS: { metric_name: string; label: string }[] = [
@@ -106,7 +220,13 @@ function ExploreInner() {
   /** When false, skip persisting so hydrate does not overwrite sessionStorage with default state. */
   const [sessionReady, setSessionReady] = useState(false);
   const [ranked, setRanked] = useState<
-    { geoid: string; composite_score: number | null; name: string | null; county_name: string | null }[]
+    {
+      geoid: string;
+      composite_score: number | null;
+      layer_value: number | null;
+      name: string | null;
+      county_name: string | null;
+    }[]
   >([]);
   const [rankedTotal, setRankedTotal] = useState(0);
   const [layerMode, setLayerMode] = useState<MapLayerMode>("composite");
@@ -121,7 +241,6 @@ function ExploreInner() {
   const [usStatesGeojson, setUsStatesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
 
   const [draft, setDraft] = useState({
-    minScore: 0,
     minRent: 0,
     minUninsured: 0,
     asthma: 0,
@@ -129,11 +248,25 @@ function ExploreInner() {
   });
   const [applied, setApplied] = useState({
     minScore: 0,
+    minPopulation: 0,
+    excludeInstitutional: false,
     minRent: 0,
     minUninsured: 0,
     asthmaHigh: false,
     urbanRural: "" as "" | "urban" | "rural",
   });
+
+  const exploreMapRef = useRef<MapRef | null>(null);
+  const suppressViewportUrlUntilRef = useRef(0);
+  const viewportDebounceRef = useRef<number | null>(null);
+  const pendingViewportRef = useRef<{ lng: number; lat: number; zoom: number } | null>(null);
+
+  const [viewportForUrl, setViewportForUrl] = useState<{ lng: number; lat: number; zoom: number } | null>(
+    null
+  );
+  const [pendingUrlFly, setPendingUrlFly] = useState<{ lat: number; lng: number; zoom: number } | null>(
+    null
+  );
 
   const skipSessionHydrate = initialQ.length > 0;
 
@@ -166,6 +299,8 @@ function ExploreInner() {
           if (cancelled) return;
           if (fc.features?.length) {
             setSearchGeojson(fc);
+            setViewportForUrl(null);
+            setPendingUrlFly(null);
             setSearchZoomKey((k) => k + 1);
           } else {
             setMapMode("browse");
@@ -244,16 +379,40 @@ function ExploreInner() {
   }, [sessionReady, sp]);
 
   useEffect(() => {
-    if (!sessionReady) return;
-    const cur = sp.get("state") ?? "";
-    const want = stateFips ?? "";
-    if (cur === want) return;
-    const next = new URLSearchParams(sp.toString());
-    if (stateFips) next.set("state", stateFips);
-    else next.delete("state");
-    const qs = next.toString();
-    router.replace(qs ? `/explore?${qs}` : "/explore", { scroll: false });
-  }, [stateFips, sessionReady, router, sp]);
+    if (!sessionReady || typeof window === "undefined") return;
+    const qParam = sp.get("q");
+    const merged = buildExploreUrlParams({
+      qParam,
+      stateFips,
+      selectedGeoid,
+      layerMode,
+      appliedMinScore: applied.minScore,
+      appliedMinPopulation: applied.minPopulation,
+      appliedExcludeInstitutional: applied.excludeInstitutional,
+      appliedMinRent: applied.minRent,
+      appliedMinUninsured: applied.minUninsured,
+      viewport: viewportForUrl,
+    });
+    const current = new URLSearchParams(window.location.search);
+    if (paramsEqual(merged, current)) return;
+    const qs = merged.toString();
+    const nextPath = qs ? `/explore?${qs}` : "/explore";
+    window.history.replaceState(window.history.state ?? null, "", nextPath);
+    router.replace(nextPath, { scroll: false });
+  }, [
+    sessionReady,
+    router,
+    sp,
+    stateFips,
+    selectedGeoid,
+    layerMode,
+    applied.minScore,
+    applied.minPopulation,
+    applied.excludeInstitutional,
+    applied.minRent,
+    applied.minUninsured,
+    viewportForUrl,
+  ]);
 
   useEffect(() => {
     if (!selectedGeoid) {
@@ -351,6 +510,109 @@ function ExploreInner() {
     setSearchResults(null);
     setSearchError(null);
     setSearchInfo(null);
+    setViewportForUrl(null);
+    setPendingUrlFly(null);
+  }, []);
+
+  useEffect(() => {
+    if (!sessionReady || typeof window === "undefined") return;
+    const parsed = parseExploreUrl(window.location.search);
+    if (parsed.tract) {
+      clearSearchMap();
+      const sf = parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2);
+      setStateFips(sf);
+      setSelectedGeoid(parsed.tract);
+    }
+    if (parsed.layer !== null) setLayerMode(parsed.layer);
+    if (parsed.minRent !== null) {
+      const v = parsed.minRent;
+      setDraft((d) => ({ ...d, minRent: v }));
+      setApplied((a) => ({ ...a, minRent: v }));
+    }
+    if (parsed.minUninsured !== null) {
+      const v = parsed.minUninsured;
+      setDraft((d) => ({ ...d, minUninsured: v }));
+      setApplied((a) => ({ ...a, minUninsured: v }));
+    }
+    if (parsed.scoreMin !== undefined) {
+      setApplied((a) => ({ ...a, minScore: parsed.scoreMin! }));
+    }
+    if (parsed.popMin !== undefined) {
+      setApplied((a) => ({ ...a, minPopulation: parsed.popMin! }));
+    }
+    if (parsed.exclInst !== undefined) {
+      setApplied((a) => ({ ...a, excludeInstitutional: parsed.exclInst! }));
+    }
+    if (parsed.viewport) {
+      const vp = parsed.viewport;
+      const stateFromTract = parsed.tract?.slice(0, 2).padStart(2).slice(0, 2);
+      const stateParamRaw = new URLSearchParams(window.location.search).get("state")?.trim() ?? "";
+      const stateFromParam =
+        stateParamRaw && /^\d{2}$/.test(stateParamRaw.padStart(2).slice(0, 2))
+          ? stateParamRaw.padStart(2).slice(0, 2)
+          : null;
+      const sfForViewport = stateFromTract || stateFromParam || stateFips;
+      if (!isExploreBrowsePlaceholderViewport(sfForViewport, vp)) {
+        setViewportForUrl({ lng: vp.lng, lat: vp.lat, zoom: vp.zoom });
+        setPendingUrlFly(vp);
+      }
+    }
+  }, [sessionReady, clearSearchMap]);
+
+  useEffect(() => {
+    if (!pendingUrlFly || !sessionReady) return;
+    const target = pendingUrlFly;
+    let cancelled = false;
+    let attempts = 0;
+    const id = window.setInterval(() => {
+      if (cancelled) return;
+      attempts += 1;
+      const map = exploreMapRef.current?.getMap?.();
+      if (!map) {
+        if (attempts > 200) {
+          window.clearInterval(id);
+          setPendingUrlFly(null);
+        }
+        return;
+      }
+      const loaded = typeof map.isStyleLoaded === "function" ? map.isStyleLoaded() : true;
+      if (!loaded && attempts < 200) return;
+      window.clearInterval(id);
+      setPendingUrlFly(null);
+      suppressViewportUrlUntilRef.current = Date.now() + 1600;
+      try {
+        map.jumpTo({ center: [target.lng, target.lat], zoom: target.zoom });
+      } catch {
+        /* ignore */
+      }
+    }, 50);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [pendingUrlFly, sessionReady, mapMode, stateFips, geojson, searchGeojson]);
+
+  useEffect(
+    () => () => {
+      if (viewportDebounceRef.current != null) window.clearTimeout(viewportDebounceRef.current);
+    },
+    []
+  );
+
+  const onExploreMapMoveEnd = useCallback((v: { lng: number; lat: number; zoom: number }) => {
+    if (typeof window !== "undefined" && Date.now() < suppressViewportUrlUntilRef.current) return;
+    pendingViewportRef.current = v;
+    if (viewportDebounceRef.current != null) window.clearTimeout(viewportDebounceRef.current);
+    viewportDebounceRef.current = window.setTimeout(() => {
+      viewportDebounceRef.current = null;
+      const p = pendingViewportRef.current;
+      if (!p) return;
+      setViewportForUrl({
+        lng: Math.round(p.lng * 10000) / 10000,
+        lat: Math.round(p.lat * 10000) / 10000,
+        zoom: Math.round(p.zoom * 10) / 10,
+      });
+    }, 500);
   }, []);
 
   const clearSearch = useCallback(() => {
@@ -391,6 +653,8 @@ function ExploreInner() {
             }
             setSearchGeojson(fc);
             setMapMode("search");
+            setViewportForUrl(null);
+            setPendingUrlFly(null);
             setSearchZoomKey((k) => k + 1);
             setSuggestOpen(false);
             return;
@@ -432,6 +696,8 @@ function ExploreInner() {
       }
       setSearchGeojson(fc);
       setMapMode("search");
+      setViewportForUrl(null);
+      setPendingUrlFly(null);
       setSearchZoomKey((k) => k + 1);
       setSuggestOpen(false);
     } catch (err: unknown) {
@@ -466,8 +732,11 @@ function ExploreInner() {
     const params: Record<string, string | undefined> = {
       state: stateFips,
       limit: "50",
+      sort_by: LAYER_SORT_API[layerMode],
     };
-    if (applied.minScore > 0) params.min_score = String(applied.minScore);
+    if (applied.minScore > 0) params.min_score = String(Math.round(applied.minScore));
+    if (applied.minPopulation > 0) params.min_population = String(applied.minPopulation);
+    if (applied.excludeInstitutional) params.exclude_institutional = "true";
     if (applied.minRent > 0) params.min_rent_burden = String(applied.minRent);
     if (applied.minUninsured > 0) params.min_uninsured = String(applied.minUninsured);
     if (applied.asthmaHigh) params.high_asthma = "true";
@@ -480,6 +749,7 @@ function ExploreInner() {
           r.items.map((i) => ({
             geoid: i.geoid,
             composite_score: i.composite_score,
+            layer_value: i.layer_value ?? null,
             name: i.name,
             county_name: i.county_name,
           }))
@@ -489,7 +759,7 @@ function ExploreInner() {
         setRanked([]);
         setRankedTotal(0);
       });
-  }, [stateFips, applied]);
+  }, [stateFips, applied, layerMode]);
 
   useEffect(() => {
     fetchList();
@@ -508,10 +778,7 @@ function ExploreInner() {
   function onPickSuggestion(item: SearchSuggestItem) {
     setSuggestOpen(false);
     if (item.kind === "state" && item.state_fips) {
-      setMapMode("browse");
-      setSearchGeojson(null);
-      setSearchResults(null);
-      setSearchError(null);
+      clearSearchMap();
       setStateFips(item.state_fips);
       setQ(item.query);
       setSearchNarrowFips(null);
@@ -523,13 +790,32 @@ function ExploreInner() {
   }
 
   function applyFilters() {
-    setApplied({
-      minScore: draft.minScore,
+    setApplied((a) => ({
+      ...a,
       minRent: draft.minRent,
       minUninsured: draft.minUninsured,
       asthmaHigh: draft.asthma >= 12,
       urbanRural: draft.urbanRural,
+    }));
+  }
+
+  function resetRankingFilters() {
+    setDraft({
+      minRent: 0,
+      minUninsured: 0,
+      asthma: 0,
+      urbanRural: "",
     });
+    setApplied((a) => ({
+      ...a,
+      minScore: 0,
+      minPopulation: 0,
+      excludeInstitutional: false,
+      minRent: 0,
+      minUninsured: 0,
+      asthmaHigh: false,
+      urbanRural: "",
+    }));
   }
 
   const onSelectTract = useCallback((geoid: string) => {
@@ -551,6 +837,8 @@ function ExploreInner() {
     setGeojson(null);
     setErr(null);
     setSelectedGeoid(null);
+    setViewportForUrl(null);
+    setPendingUrlFly(null);
   }, []);
 
   const statePickerGeoJSON = useMemo(() => {
@@ -632,26 +920,6 @@ function ExploreInner() {
     { id: "health", label: "Health" },
   ];
 
-  const exploreLayerTabsEl = (
-    <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] px-3 py-3 shadow-sm">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8e8e8e]">Layer</p>
-      <div className="mt-2 flex rounded-full bg-[#ebe6df] p-1">
-        {layerTabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setLayerMode(t.id)}
-            className={`min-w-0 flex-1 rounded-full px-2 py-2 text-center text-xs font-semibold transition ${
-              layerMode === t.id ? "bg-[#2d2d2d] text-white shadow-sm" : "bg-transparent text-[#5c534c] hover:text-[#2d2d2d]"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
   const mapDataBrowse = augmentedBrowse ?? geojson;
   const mapDataSearch = augmentedSearch ?? searchGeojson;
   return (
@@ -690,14 +958,19 @@ function ExploreInner() {
             >
               Export
             </a>
-            <button
-              type="button"
-              onClick={shareView}
-              className="shrink-0 rounded-full bg-nh-brown px-4 py-2 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
-            >
-              Share view
-            </button>
-            {shareHint ? <span className="text-xs text-nh-terracotta">{shareHint}</span> : null}
+            <div className="flex flex-col items-end gap-0.5">
+              <button
+                type="button"
+                onClick={shareView}
+                className="shrink-0 rounded-full bg-nh-brown px-4 py-2 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
+              >
+                Share view
+              </button>
+              <p className="max-w-[14rem] text-right text-[10px] leading-snug text-nh-brown-muted">
+                Link captures current view
+              </p>
+              {shareHint ? <span className="text-xs text-nh-terracotta">{shareHint}</span> : null}
+            </div>
           </div>
         </div>
       </header>
@@ -725,7 +998,7 @@ function ExploreInner() {
                   <input
                     autoComplete="off"
                     className={`relative z-[1] w-full rounded-xl border border-nh-brown/15 bg-white py-2.5 pl-10 text-sm text-nh-brown placeholder:text-nh-brown-muted/60 focus:border-nh-terracotta focus:outline-none focus:ring-1 focus:ring-nh-terracotta ${q.trim() ? "pr-10" : "pr-3"}`}
-                    placeholder="Tract, neighborhood, ZIP, address…"
+                    placeholder="Tract, neighborhood, address…"
                     value={q}
                     onChange={(e) => {
                       setQ(e.target.value);
@@ -850,7 +1123,7 @@ function ExploreInner() {
                     </ul>
                   ) : (
                     <div className="mt-3 rounded-lg border border-dashed border-nh-brown/20 bg-nh-cream/40 px-3 py-3 text-xs text-nh-brown-muted">
-                      Try a tract GEOID, place, ZIP, county, or street address in Search above.
+                      Try a tract GEOID, place, county, or street address in Search above.
                     </div>
                   )}
                 </>
@@ -860,14 +1133,34 @@ function ExploreInner() {
         </aside>
 
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col px-2 pt-2 lg:min-h-0 lg:px-4">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted">
-            <span className="font-semibold uppercase tracking-wide text-nh-brown">Composite view</span>
-            <span>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-nh-brown-muted">
+                Layer
+              </span>
+              <div className="flex min-w-0 rounded-full bg-[#ebe6df] p-1">
+                {layerTabs.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setLayerMode(t.id)}
+                    className={`min-w-0 rounded-full px-3 py-1.5 text-center text-xs font-semibold transition sm:px-4 ${
+                      layerMode === t.id
+                        ? "bg-[#2d2d2d] text-white shadow-sm"
+                        : "bg-transparent text-[#5c534c] hover:text-[#2d2d2d]"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <span className="min-w-0 text-right leading-snug">
               Showing <strong className="text-nh-brown">{tractCountOnMap || featureCount}</strong> tracts
               {tractCountOnMap ? (
                 <>
                   {" "}
-                  · <strong className="text-nh-terracotta">{priorityFlagged}</strong> flagged priority (index ≥ 50)
+                  · <strong className="text-nh-terracotta">{priorityFlagged}</strong> {priorityFlagCopy(layerMode)}
                 </>
               ) : null}
             </span>
@@ -900,7 +1193,8 @@ function ExploreInner() {
                     fillLabel={mapFillLabel(layerMode)}
                     showMetricControl={false}
                     selectedGeoid={selectedGeoid}
-                    exploreLayerTabs={exploreLayerTabsEl}
+                    exploreMapRef={exploreMapRef}
+                    onExploreMapMoveEnd={onExploreMapMoveEnd}
                   />
                 </div>
               )}
@@ -922,9 +1216,10 @@ function ExploreInner() {
                     variant="explore"
                     onSelectTract={onSelectTract}
                     showMetricControl={false}
-                    exploreLayerTabs={exploreLayerTabsEl}
                     statePickerGeoJSON={statePickerGeoJSON}
                     onSelectStateFips={onSelectStateFromMap}
+                    exploreMapRef={exploreMapRef}
+                    onExploreMapMoveEnd={onExploreMapMoveEnd}
                   />
                 </div>
               )}
@@ -969,7 +1264,8 @@ function ExploreInner() {
                     fillLabel={mapFillLabel(layerMode)}
                     showMetricControl={false}
                     selectedGeoid={selectedGeoid}
-                    exploreLayerTabs={exploreLayerTabsEl}
+                    exploreMapRef={exploreMapRef}
+                    onExploreMapMoveEnd={onExploreMapMoveEnd}
                   />
                 </div>
               )}
@@ -1037,6 +1333,20 @@ function ExploreInner() {
                     {SIDEBAR_METRICS.map(({ metric_name, label }) => {
                       const v = indicatorValue(selectedDetail.indicators, metric_name);
                       const pct = v != null ? Math.min(100, Math.max(0, v)) : null;
+                      const indRow = selectedDetail.indicators.find((i) => i.metric_name === metric_name);
+                      const pCounty = indRow?.percentile_county;
+                      const pState = indRow?.percentile_state;
+                      const useCounty = pCounty != null && Number.isFinite(pCounty);
+                      const markerPos = useCounty
+                        ? Math.min(100, Math.max(0, pCounty))
+                        : pState != null && Number.isFinite(pState)
+                          ? Math.min(100, Math.max(0, pState))
+                          : 50;
+                      const markerTitle = useCounty
+                        ? "County median (percentile rank among tracts in this county)"
+                        : pState != null && Number.isFinite(pState)
+                          ? "State median (percentile rank among tracts in this state)"
+                          : "Peer median position unavailable";
                       return (
                         <div key={metric_name}>
                           <div className="flex justify-between text-xs text-[#2d2d2d]">
@@ -1055,7 +1365,9 @@ function ExploreInner() {
                               />
                             ) : null}
                             <div
-                              className="pointer-events-none absolute left-1/2 top-0 z-[1] h-full w-px -translate-x-1/2 border-l border-dashed border-[#9ca3af]"
+                              className="pointer-events-none absolute top-0 z-[1] h-full w-px -translate-x-1/2 border-l border-dashed border-[#9ca3af]"
+                              style={{ left: `${markerPos}%` }}
+                              title={markerTitle}
                               aria-hidden
                             />
                           </div>
@@ -1065,7 +1377,8 @@ function ExploreInner() {
                   </div>
                   <p className="mt-5 border-t border-[#e8e3dc] pt-3 text-[10px] leading-snug text-[#8e8e8e]">
                     <span className="inline-block translate-y-px border-l border-dashed border-[#9ca3af] pl-1">
-                      Dashed line = county benchmark (50th percentile scale)
+                      Dashed line = county median percentile vs peers in the same county when enough tracts;
+                      otherwise state median percentile.
                     </span>
                   </p>
                 </div>
@@ -1073,34 +1386,37 @@ function ExploreInner() {
             </div>
 
             <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] shadow-sm">
-              <div className="flex items-center justify-between gap-2 border-b border-[#ebe6df] px-4 py-3">
-                <h2 className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5c4a42]">
-                  Top tracts — {TOP_TRACT_LAYER_HEADING[layerMode]}
-                </h2>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <span className="text-[11px] tabular-nums text-[#8e8e8e]">
-                    {ranked.length} / {rankedTotal || "—"}
-                  </span>
-                  {stateFips ? (
-                    <button
-                      type="button"
-                      onClick={() => setRankingFiltersOpen((v) => !v)}
-                      aria-expanded={rankingFiltersOpen}
-                      aria-controls="ranking-filters-panel"
-                      aria-label={rankingFiltersOpen ? "Hide ranking filters" : "Show ranking filters"}
-                      className={`rounded-lg p-1.5 text-[#8e8e8e] transition hover:bg-[#ebe6df] hover:text-[#5c534c] ${rankingFiltersOpen ? "bg-[#ebe6df] text-[#5c534c]" : ""}`}
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
-                        />
-                      </svg>
-                    </button>
-                  ) : null}
+              <div className="border-b border-[#ebe6df] px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5c4a42]">
+                    Top tracts — {TOP_TRACT_LAYER_HEADING[layerMode]}
+                  </h2>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <span className="text-[11px] tabular-nums text-[#8e8e8e]">
+                      {ranked.length} / {rankedTotal || "—"}
+                    </span>
+                    {stateFips ? (
+                      <button
+                        type="button"
+                        onClick={() => setRankingFiltersOpen((v) => !v)}
+                        aria-expanded={rankingFiltersOpen}
+                        aria-controls="ranking-filters-panel"
+                        aria-label={rankingFiltersOpen ? "Hide ranking filters" : "Show ranking filters"}
+                        className={`rounded-lg p-1.5 text-[#8e8e8e] transition hover:bg-[#ebe6df] hover:text-[#5c534c] ${rankingFiltersOpen ? "bg-[#ebe6df] text-[#5c534c]" : ""}`}
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                          />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-[#8e8e8e]">{TOP_TRACT_SORT_HINT[layerMode]}</p>
               </div>
 
               {stateFips && rankingFiltersOpen ? (
@@ -1111,6 +1427,53 @@ function ExploreInner() {
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">
                     Refine ranking list
                   </p>
+                  <div>
+                    <div className="flex justify-between gap-2 text-[11px] font-medium text-[#5c534c]">
+                      <span className="shrink-0">Min. composite score</span>
+                      <span className="tabular-nums">Score ≥ {applied.minScore}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={applied.minScore}
+                      onChange={(e) =>
+                        setApplied((a) => ({ ...a, minScore: Math.round(Number(e.target.value)) }))
+                      }
+                      className="mt-1 w-full accent-[#b34d3a]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="nh-pop-min" className="block text-[11px] font-medium text-[#5c534c]">
+                      Min. population
+                    </label>
+                    <select
+                      id="nh-pop-min"
+                      value={applied.minPopulation}
+                      onChange={(e) =>
+                        setApplied((a) => ({ ...a, minPopulation: Number(e.target.value) }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-[#ebe6df] bg-white py-2 pl-3 pr-8 text-sm text-[#2d2d2d] focus:border-[#b34d3a] focus:outline-none focus:ring-1 focus:ring-[#b34d3a]"
+                    >
+                      <option value={0}>Any</option>
+                      <option value={500}>500+</option>
+                      <option value={1000}>1,000+</option>
+                      <option value={2500}>2,500+</option>
+                      <option value={5000}>5,000+</option>
+                    </select>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-2.5 text-[11px] font-medium text-[#5c534c]">
+                    <input
+                      type="checkbox"
+                      checked={applied.excludeInstitutional}
+                      onChange={(e) =>
+                        setApplied((a) => ({ ...a, excludeInstitutional: e.target.checked }))
+                      }
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#d6cfc7] text-[#b34d3a] accent-[#b34d3a]"
+                    />
+                    <span>Exclude institutional tracts</span>
+                  </label>
                   <div>
                     <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
                       <span>Rent burden ≥</span>
@@ -1139,16 +1502,28 @@ function ExploreInner() {
                       className="mt-1 w-full accent-[#b34d3a]"
                     />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      applyFilters();
-                      setRankingFiltersOpen(false);
-                    }}
-                    className="w-full rounded-xl bg-[#2d2d2d] py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1f1f1f]"
-                  >
-                    Apply filters
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        applyFilters();
+                        setRankingFiltersOpen(false);
+                      }}
+                      className="w-full rounded-xl bg-[#2d2d2d] py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1f1f1f]"
+                    >
+                      Apply filters
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetRankingFilters();
+                        setRankingFiltersOpen(false);
+                      }}
+                      className="w-full rounded-xl border border-[#d6cfc7] bg-white py-2 text-sm font-semibold text-[#5c534c] shadow-sm hover:bg-[#faf8f5]"
+                    >
+                      Reset filters
+                    </button>
+                  </div>
                 </div>
               ) : null}
 
@@ -1171,7 +1546,10 @@ function ExploreInner() {
                   const label = r.name ?? `Tract ${r.geoid}`;
                   const inTray = compareTray.includes(r.geoid);
                   const isSel = selectedGeoid === r.geoid;
-                  const score = r.composite_score != null ? Math.round(r.composite_score) : null;
+                  const rankMetric = r.layer_value ?? r.composite_score;
+                  const score = rankMetric != null ? Math.round(rankMetric) : null;
+                  const scoreDisplay =
+                    score != null ? `${score}${layerMode === "composite" ? "" : "%"}` : "—";
                   const scoreTone =
                     score != null
                       ? score >= 66
@@ -1192,7 +1570,7 @@ function ExploreInner() {
                       <span
                         className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums ${scoreTone}`}
                       >
-                        {score ?? "—"}
+                        {scoreDisplay}
                       </span>
                       <button
                         type="button"
