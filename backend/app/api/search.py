@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.states import STATE_FIPS_TO_POSTAL, STATE_NAMES, STATE_POSTAL_TO_FIPS
 from app.db.session import get_db
 from app.models import RiskScore, Tract
+from app.services.score_recalc import resolve_year
 from app.schemas.tract import (
     AddressSearchRequest,
     AddressSearchResponse,
@@ -186,8 +187,7 @@ async def search_from_address(
     then load that tract from this database (with PostGIS containment as a fallback).
     """
     q = body.address.strip()
-    yq = await session.execute(select(func.max(RiskScore.year)))
-    year_eff: int = yq.scalar() or 2023
+    year_eff: int = await resolve_year(session)
 
     try:
         raw = await geocode_oneline_with_geographies(q)
@@ -279,8 +279,7 @@ async def search_tracts(
     state_fips: str | None = Query(None, min_length=2, max_length=2),
 ) -> SearchResponse:
     term = f"%{q.strip()}%"
-    yq = await session.execute(select(func.max(RiskScore.year)))
-    year_eff = yq.scalar() or 2023
+    year_eff = await resolve_year(session)
 
     sf_match = _state_fips_for_query(q)
     clauses = [

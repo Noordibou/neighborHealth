@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.models import Indicator, RiskScore, Tract
 from app.schemas.tract import GeoidsGeoJSONRequest
 from app.services.risk_score import METRIC_KEYS
+from app.services.score_recalc import resolve_year
 
 
 def _as_geojson_geometry(raw: Any) -> dict[str, Any] | None:
@@ -46,14 +47,12 @@ async def tracts_geojson(
 ) -> dict:
     """GeoJSON FeatureCollection of tract polygons with composite score properties."""
     sf = state_fips.zfill(2)
-    year_eff = year
-    if year_eff is None:
-        yq = await session.execute(select(func.max(RiskScore.year)))
-        year_eff = yq.scalar() or 2023
+    year_eff = await resolve_year(session, year)
 
     sql = text(
         """
-        SELECT t.geoid, ST_AsGeoJSON(t.geometry)::json AS g,
+        SELECT t.geoid,
+               ST_AsGeoJSON(ST_SimplifyPreserveTopology(t.geometry, 0.001))::json AS g,
                r.composite_score, t.name,
                t.county_name, t.place_name, t.state_fips
         FROM tracts t
@@ -118,8 +117,7 @@ async def tracts_geojson_by_geoids(
     if not geoids:
         raise HTTPException(status_code=400, detail="No valid GEOIDs provided.")
 
-    yq = await session.execute(select(func.max(RiskScore.year)))
-    year_eff: int = yq.scalar() or 2023
+    year_eff: int = await resolve_year(session)
 
     # Use ORM + IN (...): expanding bindparam inside raw text() is unreliable with asyncpg.
     stmt = (

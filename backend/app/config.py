@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     census_api_key: Optional[str] = None
     cdc_api_key: Optional[str] = None
 
-    ai_model: str = "claude-3-5-haiku-20241022"
+    ai_model: str = "claude-haiku-4-5-20251001"
     cors_origins: str = "http://localhost:3000"
 
     @property

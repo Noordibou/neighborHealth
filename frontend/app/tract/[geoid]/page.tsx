@@ -1,8 +1,19 @@
 import { notFound } from "next/navigation";
 import { AISummaryPanel } from "@/components/AISummaryPanel";
+import { AdditionalIndicatorsPanel } from "@/components/AdditionalIndicatorsPanel";
 import { DemographicsPanel } from "@/components/DemographicsPanel";
+import { NearbyClinicPanel } from "@/components/NearbyClinicPanel";
 import { ScorecardActions } from "@/components/ScorecardActions";
 import { SiteFooter } from "@/components/SiteFooter";
+import dynamic from "next/dynamic";
+
+const TrendChart = dynamic(
+  () => import("@/components/TrendChart").then((m) => ({ default: m.TrendChart })),
+  {
+    ssr: false,
+    loading: () => <div className="h-[60px] w-full animate-pulse rounded-md bg-nh-sand" aria-hidden />,
+  }
+);
 import { TractMapBackControl } from "@/components/TractMapBackControl";
 import { TractMetricGrid } from "@/components/TractMetricGrid";
 import { TractScorecardTable } from "@/components/TractScorecardTable";
@@ -107,24 +118,36 @@ export default async function TractPage({ params }: Props) {
 
         <div className="mt-6 flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 flex-1 flex-col gap-6 sm:flex-row sm:items-start">
-            {scoreRounded != null && (
-              <div className="flex shrink-0 flex-col items-center gap-2 sm:items-start">
-                <div
-                  className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
-                  aria-label={`Composite score ${scoreRounded}`}
-                >
-                  <div className="text-center">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
-                    <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
+            <div className="flex shrink-0 flex-col items-center gap-2 sm:items-start">
+              {scoreRounded != null && (
+                <>
+                  <div
+                    className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
+                    aria-label={`Composite score ${scoreRounded}`}
+                  >
+                    <div className="text-center">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
+                      <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
+                    </div>
                   </div>
+                  {tract.risk_score?.rank != null && tract.risk_score.rank_total != null ? (
+                    <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left md:ml-6">
+                      Rank {tract.risk_score.rank} / {tract.risk_score.rank_total}
+                    </p>
+                  ) : null}
+                  {tract.state_composite_score != null ? (
+                    <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left md:ml-6">
+                      State score {Math.round(tract.state_composite_score)}
+                    </p>
+                  ) : null}
+                </>
+              )}
+              {(tract.has_trend ?? false) ? (
+                <div className="mt-1 w-full max-w-[min(100%,20rem)] sm:max-w-xs">
+                  <TrendChart geoid={tract.geoid} has_trend={true} />
                 </div>
-                {tract.risk_score?.rank != null && tract.risk_score.rank_total != null ? (
-                  <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left md:ml-6">
-                    Rank {tract.risk_score.rank} / {tract.risk_score.rank_total}
-                  </p>
-                ) : null}
-              </div>
-            )}
+              ) : null}
+            </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Neighborhood profile</p>
               <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-nh-brown md:text-4xl">
@@ -154,6 +177,10 @@ export default async function TractPage({ params }: Props) {
         </section>
 
         <DemographicsPanel geoid={tract.geoid} />
+
+        <NearbyClinicPanel geoid={tract.geoid} />
+
+        <AdditionalIndicatorsPanel indicators={tract.display_indicators ?? []} />
 
         <section className="mt-12">
           <h2 className="font-display text-xl font-semibold text-nh-brown">Metric cards</h2>

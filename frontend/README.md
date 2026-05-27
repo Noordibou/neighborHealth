@@ -16,7 +16,7 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-The **Explore** map and tract lists call the FastAPI backend (`NEXT_PUBLIC_API_URL`, default `http://localhost:8000`). If Postgres only has the schema and no rows, the map will stay empty until you run **`python ingest.py --states 06,12,17,36,48`** from the `backend/` folder (see the repository root README, “Data pipeline”).
+The **Explore** map and tract lists call the FastAPI backend (`NEXT_PUBLIC_API_URL`, default `http://localhost:8000`). If Postgres only has the schema and no rows, the map will stay empty until you run **`python ingest.py --states 06,12,17,36,48`** from the `backend/` folder (see the repository root README, “Data pipeline”; optional **`--year`** matches the ACS vintage you loaded).
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

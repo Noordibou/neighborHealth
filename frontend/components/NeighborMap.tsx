@@ -1,11 +1,22 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
+import maplibregl from "maplibre-gl";
 import type { MutableRefObject, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Source, type MapRef } from "react-map-gl/maplibre";
 import type { Map as MapLibreMap, MapLayerMouseEvent } from "maplibre-gl";
-import { getExploreBrowsePlaceholderView } from "@/lib/exploreMapPlaceholder";
+import { BIVARIATE_COLORS } from "@/lib/mapGeojson";
+import { getExploreBrowsePlaceholderView, getExploreUsOverviewView } from "@/lib/exploreMapPlaceholder";
+
+// MapLibre GL 4.x requires an explicit worker URL in bundled/Next.js environments.
+// Without this, new Worker("") fails silently and glyphs (required for text labels)
+// never load — geometry still renders but city/road/country names are absent.
+if (typeof window !== "undefined") {
+  // Resolve against the document URL so the worker always loads from this origin
+  // (avoids edge cases with relative resolution in worker creation).
+  maplibregl.setWorkerUrl(new URL("/maplibre-worker.js", window.location.href).href);
+}
 
 /**
  * Vector basemap (roads, labels, landcover) without an API key.
@@ -14,14 +25,26 @@ import { getExploreBrowsePlaceholderView } from "@/lib/exploreMapPlaceholder";
  */
 export const DEFAULT_MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 
+/** Fallback when the style has not been inspected yet (Liberty uses this id today). */
+const DEFAULT_BASEMAP_LABEL_BEFORE_ID = "waterway_line_label";
+
+function firstSymbolLayerIdFromStyle(map: MapLibreMap): string | undefined {
+  const layers = map.getStyle()?.layers;
+  if (!layers) return undefined;
+  for (const layer of layers) {
+    if (layer.type === "symbol" && typeof layer.id === "string") return layer.id;
+  }
+  return undefined;
+}
+
 const METRICS = [
   { id: "composite_score", label: "Composite risk" },
   { id: "rent_burden_pct", label: "Rent burden (30%+)" },
   { id: "overcrowding_pct", label: "Overcrowding" },
-  { id: "vacancy_rate", label: "Vacancy rate" },
+  { id: "structural_vacancy_rate", label: "Structural vacancy" },
   { id: "uninsured_pct", label: "Uninsured (access)" },
   { id: "asthma_pct", label: "Asthma prevalence" },
-  { id: "disability_pct", label: "Disability" },
+  { id: "mental_health_pct", label: "Mental health" },
   { id: "heat_index", label: "Heat index (proxy)" },
 ] as const;
 
@@ -206,6 +229,16 @@ type Props = {
   fillProperty?: string | null;
   /** Legend / hover label for `fillProperty` mode. */
   fillLabel?: string;
+  /**
+   * When "bivariate", tract fill uses `nh_bivariate_class` + `BIVARIATE_COLORS` (numeric ramp skipped).
+   * Does not change `effectiveKey` / hover metrics — only map fill paint.
+   */
+  choroplethStyle?: "ramp" | "bivariate";
+  /**
+   * When true with `choroplethStyle="bivariate"`, the built-in top-right bivariate legend is omitted
+   * (e.g. Explore renders `BivariateLegend` over the map instead).
+   */
+  suppressBuiltInBivariateLegend?: boolean;
   /** When false, hides the metric dropdown (parent drives `fillProperty`). */
   showMetricControl?: boolean;
   /** Strong outline for the active tract (GEOID string). */
@@ -344,6 +377,18 @@ function choroplethNoDataExpr(key: string): unknown[] {
 const CHORO_STOP_FRACS = [0, 0.22, 0.48, 0.74, 1] as const;
 const CHORO_COLORS = ["#faf6ef", "#e8c4b0", "#d4896e", "#b85c3a", "#2c1810"] as const;
 
+/** Stable key order for MapLibre `match` on `nh_bivariate_class`. */
+const BIVARIATE_CLASS_KEYS = ["1-1", "1-2", "1-3", "2-1", "2-2", "2-3", "3-1", "3-2", "3-3"] as const;
+
+function bivariateFillColorExpr(): unknown[] {
+  const expr: unknown[] = ["match", ["get", "nh_bivariate_class"]];
+  for (const k of BIVARIATE_CLASS_KEYS) {
+    expr.push(k, BIVARIATE_COLORS[k]);
+  }
+  expr.push("#cccccc");
+  return expr;
+}
+
 function buildChoroplethColorStops(lo: number, hi: number): (number | string)[] {
   const span = hi - lo;
   const out: (number | string)[] = [];
@@ -353,7 +398,7 @@ function buildChoroplethColorStops(lo: number, hi: number): (number | string)[] 
   return out;
 }
 
-export function NeighborMap({
+function NeighborMapInner({
   stateFips,
   data,
   mapStyle,
@@ -363,6 +408,8 @@ export function NeighborMap({
   zoomToResultsKey = 0,
   fillProperty = null,
   fillLabel = "Priority index",
+  choroplethStyle = "ramp",
+  suppressBuiltInBivariateLegend = false,
   showMetricControl = true,
   selectedGeoid = null,
   hoverLegendBottomClassName,
@@ -386,6 +433,18 @@ export function NeighborMap({
   }, [exploreMapRef]);
   const styleUrl = mapStyle ?? process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? DEFAULT_MAP_STYLE;
 
+  /** Insert choropleth before this basemap layer so roads/shields/place names stay on top. */
+  const [basemapLabelBeforeId, setBasemapLabelBeforeId] = useState(DEFAULT_BASEMAP_LABEL_BEFORE_ID);
+
+  useEffect(() => {
+    setBasemapLabelBeforeId(DEFAULT_BASEMAP_LABEL_BEFORE_ID);
+  }, [styleUrl]);
+
+  const onMapLoad = useCallback((e: { target: MapLibreMap }) => {
+    const anchor = firstSymbolLayerIdFromStyle(e.target);
+    if (anchor) setBasemapLabelBeforeId(anchor);
+  }, []);
+
   const [colorBy, setColorBy] = useState<string>("composite_score");
   const effectiveKey = fillProperty ?? colorBy;
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
@@ -403,10 +462,10 @@ export function NeighborMap({
   const fillOpacity = 0.78;
   const fillOpacityHover = Math.min(0.95, fillOpacity + 0.08);
 
-  const choroplethRange = useMemo(
-    () => (data?.features?.length ? numericPropertyRange(data, effectiveKey) : null),
-    [data, effectiveKey]
-  );
+  const choroplethRange = useMemo(() => {
+    if (choroplethStyle === "bivariate" || !data?.features?.length) return null;
+    return numericPropertyRange(data, effectiveKey);
+  }, [data, effectiveKey, choroplethStyle]);
 
   const colorDomain = useMemo(
     () => choroplethDomain(choroplethRange, effectiveKey),
@@ -418,7 +477,23 @@ export function NeighborMap({
     [colorDomain.lo, colorDomain.hi]
   );
 
+  const fillChoroplethKey = choroplethStyle === "bivariate" ? "nh_bivariate_class" : effectiveKey;
+
   const fillPaint = useMemo(() => {
+    const fillOpacityExpr: unknown = [
+      "case",
+      ["boolean", ["feature-state", "hover"], false],
+      fillOpacityHover,
+      ["literal", fillOpacity],
+    ];
+    if (choroplethStyle === "bivariate") {
+      const noBio = choroplethNoDataExpr("nh_bivariate_class");
+      const fillColor: unknown[] = ["case", noBio, NO_DATA_CHOROPLETH_FILL, bivariateFillColorExpr()];
+      return {
+        "fill-color": fillColor,
+        "fill-opacity": fillOpacityExpr,
+      };
+    }
     const key = effectiveKey;
     const noData = choroplethNoDataExpr(key);
     const ramp: unknown[] = [
@@ -428,21 +503,15 @@ export function NeighborMap({
       ...colorStops,
     ];
     const fillColor: unknown[] = ["case", noData, NO_DATA_CHOROPLETH_FILL, ramp];
-    const fillOpacityExpr: unknown = [
-      "case",
-      ["boolean", ["feature-state", "hover"], false],
-      fillOpacityHover,
-      ["literal", fillOpacity],
-    ];
     return {
       "fill-color": fillColor,
       "fill-opacity": fillOpacityExpr,
     };
-  }, [effectiveKey, colorStops, fillOpacity, fillOpacityHover]);
+  }, [choroplethStyle, effectiveKey, colorStops, fillOpacity, fillOpacityHover]);
 
   const lineWidthBase = 0.45;
   const linePaint = useMemo(() => {
-    const key = effectiveKey;
+    const key = fillChoroplethKey;
     const noData = choroplethNoDataExpr(key);
     const sel = selectedGeoid?.trim() ?? "";
     const isSelected: unknown[] =
@@ -474,7 +543,7 @@ export function NeighborMap({
         ["case", noData, 0.38, 0.42],
       ],
     };
-  }, [lineWidthBase, effectiveKey, selectedGeoid]);
+  }, [lineWidthBase, fillChoroplethKey, selectedGeoid]);
 
   const onClick = useCallback(
     (e: MapLayerMouseEvent) => {
@@ -534,14 +603,14 @@ export function NeighborMap({
             /* ignore */
           }
         }
-        setHoverInfo(propsToHover(props, effectiveKey));
+        setHoverInfo(propsToHover(props, fillChoroplethKey));
       } else {
         canvas.style.cursor = "";
         clearHoverFeatureState(map);
         setHoverInfo(null);
       }
     },
-    [hasTracts, showStatePicker, clearHoverFeatureState, effectiveKey]
+    [hasTracts, showStatePicker, clearHoverFeatureState, fillChoroplethKey]
   );
 
   const onMouseLeave = useCallback(
@@ -554,12 +623,15 @@ export function NeighborMap({
   );
 
   const center = useMemo(() => {
-    if (stateFips == null) return [-98, 39] as [number, number];
+    if (stateFips == null) {
+      const v = getExploreUsOverviewView();
+      return [v.lng, v.lat] as [number, number];
+    }
     const v = getExploreBrowsePlaceholderView(stateFips);
     return [v.lng, v.lat] as [number, number];
   }, [stateFips]);
 
-  const zoom = stateFips == null ? 3.5 : getExploreBrowsePlaceholderView(stateFips).zoom;
+  const zoom = stateFips == null ? getExploreUsOverviewView().zoom : getExploreBrowsePlaceholderView(stateFips).zoom;
 
   const boundsKey = useMemo(() => {
     if (!data?.features?.length) return "0";
@@ -600,19 +672,38 @@ export function NeighborMap({
     const maxZoom = maxZoomForSearchExtent(lonSpan, latSpan);
 
     let cancelled = false;
-    const apply = () => {
+    const fitOpts = {
+      padding: { top: 96, bottom: 56, left: 56, right: 56 },
+      maxZoom,
+    } as const;
+
+    const applyAnimated = () => {
       if (cancelled) return;
       const map = mapRef.current?.getMap();
       if (!map) return;
       try {
         map.resize();
         map.fitBounds(bounds, {
-          padding: { top: 96, bottom: 56, left: 56, right: 56 },
+          ...fitOpts,
           duration: 1100,
-          maxZoom,
         });
       } catch {
         /* ignore fit errors for degenerate bounds */
+      }
+    };
+
+    const applySnap = () => {
+      if (cancelled) return;
+      const map = mapRef.current?.getMap();
+      if (!map) return;
+      try {
+        map.resize();
+        map.fitBounds(bounds, {
+          ...fitOpts,
+          duration: 0,
+        });
+      } catch {
+        /* ignore */
       }
     };
 
@@ -626,14 +717,16 @@ export function NeighborMap({
       }
       const kick = () => {
         if (cancelled) return;
-        apply();
-        map.once("idle", apply);
+        applyAnimated();
+        map.once("idle", applySnap);
       };
       if (map.loaded()) kick();
       else map.once("load", kick);
     };
     raf = requestAnimationFrame(() => requestAnimationFrame(waitMap));
-    const fallback = window.setTimeout(apply, 650);
+    const fallback = window.setTimeout(() => {
+      if (!cancelled) applyAnimated();
+    }, 900);
 
     return () => {
       cancelled = true;
@@ -645,7 +738,7 @@ export function NeighborMap({
   useEffect(() => {
     hoveredGeoidRef.current = null;
     setHoverInfo(null);
-  }, [data, boundsKey]);
+  }, [data, boundsKey, choroplethStyle]);
 
   const fmtPct = (v: number | null, digits = 0) =>
     v != null && Number.isFinite(v) ? `${digits ? v.toFixed(digits) : Math.round(v)}%` : "—";
@@ -674,8 +767,12 @@ export function NeighborMap({
               <p className="mt-2 rounded-md border border-orange-400/55 bg-orange-900/75 px-2 py-1.5 text-[11px] leading-snug text-orange-100">
                 <span className="font-semibold text-orange-200">Map fill:</span> light{" "}
                 <strong className="text-orange-200">orange</strong> means no value for{" "}
-                <strong>{METRICS.find((m) => m.id === effectiveKey)?.label ?? fillLabel}</strong> on this tract (see
-                legend on the map).
+                <strong>
+                  {choroplethStyle === "bivariate"
+                    ? "Bivariate class (housing stress × health burden)"
+                    : METRICS.find((m) => m.id === effectiveKey)?.label ?? fillLabel}
+                </strong>{" "}
+                on this tract (see legend on the map).
               </p>
             ) : null}
             {!hasMetrics ? (
@@ -728,6 +825,37 @@ export function NeighborMap({
     choroplethRange != null
       ? `Scale spans ~${Math.round(colorDomain.lo)}–${Math.round(colorDomain.hi)} on tracts shown here so similar values read as different shades.`
       : "No numeric values found for this metric on the current layer.";
+
+  const bivariateLegend =
+    choroplethStyle === "bivariate" ? (
+      <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">{fillLabel}</p>
+        <p className="mt-1 max-w-[12rem] text-[9px] leading-snug text-nh-brown-muted">
+          3×3 matrix: housing stress (columns 1–3) × health burden (rows 1–3). Tertiles within the map.
+        </p>
+        <div
+          className="mt-2 grid w-[4.5rem] grid-cols-3 gap-0.5 rounded border border-nh-brown/10 p-0.5"
+          aria-label="Bivariate color key"
+        >
+          {(["3-1", "3-2", "3-3", "2-1", "2-2", "2-3", "1-1", "1-2", "1-3"] as const).map((cell) => (
+            <div
+              key={cell}
+              className="aspect-square rounded-[1px]"
+              style={{ backgroundColor: BIVARIATE_COLORS[cell] }}
+              title={cell}
+            />
+          ))}
+        </div>
+        <div className="mt-2 flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
+          <span
+            className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border border-orange-400/70 shadow-sm"
+            style={{ backgroundColor: NO_DATA_CHOROPLETH_FILL }}
+            aria-hidden
+          />
+          <p className="mt-0.5 text-[9px] text-orange-800">No bivariate class (missing blend)</p>
+        </div>
+      </div>
+    ) : null;
 
   const legend = (
     <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
@@ -801,12 +929,14 @@ export function NeighborMap({
               })
           : undefined
       }
+      onLoad={onMapLoad}
     >
       {showStatePicker && statePickerGeoJSON ? (
         <Source id="us-states-picker" key={`sp-${statePickerKey}`} type="geojson" data={statePickerGeoJSON} promoteId="state_fips">
           <Layer
             id="state-fill"
             type="fill"
+            beforeId={basemapLabelBeforeId}
             paint={{
               "fill-color": [
                 "case",
@@ -820,6 +950,7 @@ export function NeighborMap({
           <Layer
             id="state-outline"
             type="line"
+            beforeId={basemapLabelBeforeId}
             paint={{
               "line-color": "#2c1810",
               "line-width": 0.65,
@@ -830,8 +961,8 @@ export function NeighborMap({
       ) : null}
       {hasTracts && data ? (
         <Source id="tracts" key={`tract-src-${boundsKey}`} type="geojson" data={data} promoteId="geoid">
-          <Layer id="tract-fill" type="fill" paint={fillPaint as never} />
-          <Layer id="tract-outline" type="line" paint={linePaint as never} />
+          <Layer id="tract-fill" type="fill" beforeId={basemapLabelBeforeId} paint={fillPaint as never} />
+          <Layer id="tract-outline" type="line" beforeId={basemapLabelBeforeId} paint={linePaint as never} />
         </Source>
       ) : null}
     </Map>
@@ -840,7 +971,14 @@ export function NeighborMap({
   if (variant === "explore") {
     /* Fill parent flex height; avoid raw 100vh so bottom UI (compare tray) does not clip the map/hover card. */
     const leftChrome = exploreLayerTabs ?? layerPanel;
-    const rightLegend = showStatePicker && !hasTracts ? statePickerLegend : legend;
+    const rightLegend =
+      showStatePicker && !hasTracts
+        ? statePickerLegend
+        : hasTracts && choroplethStyle === "bivariate" && !suppressBuiltInBivariateLegend
+          ? bivariateLegend
+          : hasTracts && choroplethStyle === "ramp"
+            ? legend
+            : null;
     return (
       <div className="relative isolate h-full min-h-[220px] w-full flex-1 overflow-hidden rounded-xl border border-nh-brown/10 bg-nh-sand/40 shadow-inner sm:min-h-[260px]">
         {leftChrome ? (
@@ -887,3 +1025,5 @@ export function NeighborMap({
     </div>
   );
 }
+
+export const NeighborMap = memo(NeighborMapInner);

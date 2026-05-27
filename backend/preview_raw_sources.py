@@ -32,7 +32,7 @@ PLACES_BASE = f"https://chronicdata.cdc.gov/resource/{PLACES_DATASET}.json"
 INGEST_FIELD_NOTES: dict[str, str] = {
     "rent_burden_pct": "Computed in ingest: 100 * (B25070_007E+008E+009E+010E) / B25070_001E (rent 50%+ of income).",
     "overcrowding_pct": "Computed in ingest: 100 * sum(B25014 overcrowding cells) / B25014_001E.",
-    "vacancy_rate": "Computed in ingest: 100 * B25002_003E / B25002_001E.",
+    "structural_vacancy_rate": "Computed in ingest: 100 * (B25002_003E - B25004_006E) / B25002_001E (total vacancies minus seasonal/recreational units).",
     "asthma_pct": "Stored from PLACES field casthma_crudeprev (crude prevalence).",
     "uninsured_pct": "Stored from PLACES field access2_crudeprev (labeled access2 in source).",
     "disability_pct": "Stored from PLACES field disability_crudeprev.",

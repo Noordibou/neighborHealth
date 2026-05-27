@@ -25,5 +25,5 @@ class Indicator(Base):
     tract = relationship("Tract", back_populates="indicators")
 
     __table_args__ = (
-        UniqueConstraint("geoid", "source", "metric_name", "year", name="uq_indicator_tract_source_metric_year"),
+        UniqueConstraint("geoid", "metric_name", "year", name="uq_indicator_tract_metric_year"),
     )

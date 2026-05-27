@@ -16,7 +16,8 @@ NeighborHealth is a housing and health equity prioritization tool for nonprofits
 - Node.js 20+ and `npm`
 - **PostgreSQL with PostGIS** reachable from your machine — easiest path is Docker (see below); without it you must install Postgres + PostGIS yourself and set `DATABASE_URL`
 - The map does **not** require a Mapbox account; it uses **MapLibre** with a default public style (optional `NEXT_PUBLIC_MAP_STYLE_URL` to override)
-- Optional: `ANTHROPIC_API_KEY` for AI summaries; `CENSUS_API_KEY` for higher Census API rate limits
+- Optional: `ANTHROPIC_API_KEY` for AI summaries
+- **`CENSUS_API_KEY`** for **`python ingest.py`**: Census ACS calls redirect without a key ([signup](https://api.census.gov/data/key_signup.html))
 
 ## Environment variables
 
@@ -27,7 +28,7 @@ NeighborHealth is a housing and health equity prioritization tool for nonprofits
 | `ANTHROPIC_API_KEY` | API | Claude summaries on `/api/tracts/{geoid}/summary` |
 | `MAPBOX_TOKEN` | API | Optional legacy; unused by the MapLibre frontend |
 | `CDC_API_KEY` | Ingest / API | Optional Socrata app token for CDC PLACES |
-| `CENSUS_API_KEY` | Ingest | Optional Census API key |
+| `CENSUS_API_KEY` | Ingest | **Required for ingest:** Census ACS requests redirect without a key ([signup](https://api.census.gov/data/key_signup.html)) |
 
 **Frontend** (`frontend/.env.local`):
 
@@ -79,12 +80,55 @@ Default sample states: **CA, FL, IL, NY, TX** (FIPS `06,12,17,36,48`).
 cd backend
 source .venv/bin/activate
 python ingest.py --states 06,12,17,36,48
+python ingest.py --states 48 --year 2021   # optional: ACS / PLACES vintage (default 2022)
 docker compose exec backend sh -c "cd /app && python ingest.py --states 06,12,17,36,48"
+sh -c "cd /app && python ingest.py --states 06,12,17,36,48 --year 2021"
+```
+
+**Multi-year ingest (through 2024)** — `ingest.py` accepts `--year` **2020–2024** (one vintage per run). To load every supported year for the default states, from `backend/` with the venv active:
+
+```bash
+chmod +x scripts/ingest_years_2020_2024.sh   # once
+./scripts/ingest_years_2020_2024.sh
+# or: ./scripts/ingest_years_2020_2024.sh 48
+```
+
+Texas-only example:
+
+```bash
+cd backend && source .venv/bin/activate
+for y in 2020 2021 2022 2023 2024; do python ingest.py --states 48 --year "$y"; done
+```
+
+Helper script (same 2020–2024 loop; optional state list argument). If your prompt is already under `.../neighborHealth/backend`, skip `cd backend` (a second `cd backend` fails with “No such file or directory”).
+
+```bash
+cd backend   # omit if you are already in backend/
+source .venv/bin/activate
+chmod +x scripts/ingest_years_2020_2024.sh   # once
+./scripts/ingest_years_2020_2024.sh
+# or: ./scripts/ingest_years_2020_2024.sh 48
+```
+
+Shorter range (e.g. **2022–2024** only): change the `for` list to `2022 2023 2024` (or edit the script loop).
+
+- **`404` from `api.census.gov/data/{year}/acs/acs5`:** That ACS 5-year vintage is not on the Census API yet; use a supported `--year` (currently **2020–2024**).
+
+**HRSA clinics only** (populate `clinics` + `tract_clinics` without a full ingest — requires tract centroids already in the DB):
+
+```bash
+cd backend && source .venv/bin/activate
+python scripts/load_hrsa_clinics.py
 ```
 
 - Idempotent: re-run to refresh data for those states (same analysis year).
 - **HUD CHAS**: ACS proxies are used for rent burden and overcrowding in this MVP; CHAS-specific files can be wired into `ingest.py` later.
 - Docker-aware DB targeting: when run on host, `ingest.py` now auto-targets the Docker DB (`localhost:5432`) whenever the Compose `db` service is running, to avoid splitting data across two Postgres instances. Set `DOCKER_INGEST_DATABASE_URL` to override the default Docker target.
+
+**Ingest troubleshooting**
+
+- **`invalid_key.html` / Census 302:** The key in `CENSUS_API_KEY` is not accepted (typo, or a **trailing period** often pasted from email text like `…abc123.`). Fix `.env` so the value is only the hex key. Test the same ACS URL in a browser and confirm JSON. `httpx` may log request URLs at INFO level — **rotate the key** at [Census key signup](https://api.census.gov/data/key_signup.html) if it was exposed.
+- **`ConnectTimeout` to `chronicdata.cdc.gov`:** Usually transient (Docker/WSL networking, VPN, or firewall). Retry; run ingest on the **host** (`python ingest.py` from `backend/`) instead of `docker compose exec` if it keeps failing.
 
 ### 4. Frontend
 

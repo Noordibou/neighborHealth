@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,7 +13,7 @@ class AISummary(Base):
 
     geoid: Mapped[str] = mapped_column(String(11), ForeignKey("tracts.geoid", ondelete="CASCADE"), primary_key=True)
     summary_text: Mapped[str] = mapped_column(Text)
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.utcnow())
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     model_version: Mapped[str] = mapped_column(String(64))
 
     tract = relationship("Tract", back_populates="ai_summary")

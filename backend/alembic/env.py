@@ -10,10 +10,12 @@ from app.config import settings
 from app.db.base import Base
 from app.models import (  # noqa: F401
     AISummary,
+    Clinic,
     Indicator,
     RiskScore,
     SavedView,
     Tract,
+    TractClinic,
     TractDemographics,
     User,
 )

@@ -8,14 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from weasyprint import HTML
 
 from app.models import AISummary, Indicator, RiskScore, Tract, TractDemographics
 from app.schemas.tract import CompareResponse, IndicatorOut
-from app.services.risk_score import METRIC_KEYS, TractValues, compute_batch_scores
-from app.services.score_recalc import load_metric_map_for_year
+from app.services.risk_score import METRIC_KEYS
+from app.services.score_recalc import get_cached_default_scores, resolve_year
 
 TEMPLATE = Template(
     """
@@ -64,11 +64,12 @@ _COMPARE_ENV = Environment(
 METRIC_LABELS: dict[str, str] = {
     "rent_burden_pct": "Rent burden",
     "overcrowding_pct": "Overcrowding",
-    "vacancy_rate": "Vacancy rate",
+    "structural_vacancy_rate": "Structural vacancy",
     "uninsured_pct": "Uninsured rate",
     "asthma_pct": "Asthma prevalence",
-    "disability_pct": "Disability rate",
+    "mental_health_pct": "Mental health",
     "heat_index": "Heat stress index",
+    "disability_pct": "Disability rate",  # stored, not scored — display-only
 }
 
 DIVERGENCE_THRESHOLD = 25
@@ -85,7 +86,7 @@ def format_metric_value(metric: str, value: float | None) -> str:
         return f"{round(fv)}% burdened"
     if metric == "heat_index":
         return f"{fv:.1f}"
-    if metric.endswith("_pct") or metric == "vacancy_rate":
+    if metric.endswith("_pct") or metric == "structural_vacancy_rate":
         return f"{fv:.1f}%"
     return f"{fv:.2f}"
 
@@ -320,18 +321,9 @@ async def load_compare_data_for_pdf(
     if len(parts) < 2 or len(parts) > 4:
         raise ValueError("Provide between 2 and 4 GEOIDs")
 
-    year_eff = year
-    if year_eff is None:
-        yq = await session.execute(select(func.max(RiskScore.year)))
-        year_eff = yq.scalar() or 2023
+    year_eff = await resolve_year(session, year)
 
-    metric_map = await load_metric_map_for_year(session, year_eff)
-    cohort = [
-        TractValues(geoid=g, values={m: vals.get(m) for m in METRIC_KEYS})
-        for g, vals in metric_map.items()
-        if all(vals.get(m) is not None for m in METRIC_KEYS)
-    ]
-    scores = compute_batch_scores(cohort)
+    scores = await get_cached_default_scores(session, year_eff)
 
     series: list[dict[str, float | str]] = []
     raw: dict[str, list[IndicatorOut]] = {}

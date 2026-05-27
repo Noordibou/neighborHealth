@@ -1,4 +1,12 @@
 /**
+ * Fixed camera for the US state-picker (no `state=` selected). Conterminous US only — never a global/world zoom.
+ * Keep in sync with `NeighborMap` when `stateFips == null`.
+ */
+export function getExploreUsOverviewView(): { lng: number; lat: number; zoom: number } {
+  return { lng: -98.2, lat: 39.35, zoom: 3.5 };
+}
+
+/**
  * Default explore-map camera when a state is selected but fitBounds has not run yet.
  * Must stay aligned with `NeighborMap` explore browse `center` / `zoom` logic.
  */

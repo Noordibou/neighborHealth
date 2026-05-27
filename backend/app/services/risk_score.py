@@ -7,20 +7,27 @@ weighted-averaged. Weights default to equal (1/7 each) and may be overridden.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 # Canonical metric keys used across API, DB, and frontend
 METRIC_KEYS: tuple[str, ...] = (
     "rent_burden_pct",
     "overcrowding_pct",
-    "vacancy_rate",
+    "structural_vacancy_rate",
     "uninsured_pct",
     "asthma_pct",
-    "disability_pct",
+    "mental_health_pct",
     "heat_index",
 )
 
-DEFAULT_WEIGHTS: dict[str, float] = {k: 1.0 / len(METRIC_KEYS) for k in METRIC_KEYS}
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "rent_burden_pct":         0.25,
+    "uninsured_pct":           0.20,
+    "overcrowding_pct":        0.20,
+    "mental_health_pct":       0.15,
+    "asthma_pct":              0.10,
+    "structural_vacancy_rate": 0.05,
+    "heat_index":              0.05,
+}
 
 
 def clamp_weights(weights: dict[str, float] | None) -> dict[str, float]:
@@ -89,14 +96,3 @@ def compute_batch_scores(
     return result
 
 
-def parse_weight_query(raw: dict[str, Any] | None) -> dict[str, float] | None:
-    if not raw:
-        return None
-    out: dict[str, float] = {}
-    for k in METRIC_KEYS:
-        if k in raw:
-            try:
-                out[k] = float(raw[k])
-            except (TypeError, ValueError):
-                continue
-    return out or None

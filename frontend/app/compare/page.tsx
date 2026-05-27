@@ -1,20 +1,15 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import type { TooltipContentProps } from "recharts";
 import { SiteFooter } from "@/components/SiteFooter";
+
+const CompareProfileChart = dynamic(() => import("@/components/CompareProfileChart"), {
+  ssr: false,
+  loading: () => <div className="mt-10 h-[420px] w-full animate-pulse rounded-2xl bg-nh-sand" />,
+});
 import { getCompare, getTract, type IndicatorRow } from "@/lib/api";
 import { buildCompareInsights, type CompareDemographicsIncomeMap } from "@/lib/compareInsights";
 import { METRIC_KEYS } from "@/lib/riskScore";
@@ -42,10 +37,10 @@ const LABELS: Record<string, string> = Object.fromEntries(
 const METRIC_SHORT_LABELS: Record<MetricKey, string> = {
   rent_burden_pct: "Rent burden",
   overcrowding_pct: "Overcrowding",
-  vacancy_rate: "Vacancy",
+  structural_vacancy_rate: "Vacancy",
   uninsured_pct: "Uninsured",
   asthma_pct: "Asthma",
-  disability_pct: "Disability",
+  mental_health_pct: "Mental health",
   heat_index: "Heat index",
 };
 
@@ -171,17 +166,6 @@ function RaceInlineBar({ d }: { d: TractDemographicsApiRow }) {
       ))}
     </div>
   );
-}
-
-function ordinalSuffix(n: number): string {
-  if (11 <= (n % 100) && (n % 100) <= 13) return "th";
-  return ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
-}
-
-function nationalPercentilePhrase(p: number | null | undefined): string {
-  if (p == null || Number.isNaN(p)) return "National rank unavailable";
-  const n = Math.round(p);
-  return `${n}${ordinalSuffix(n)} nationally`;
 }
 
 function clientApiBase(): string {
@@ -370,43 +354,6 @@ function CompareInner() {
     });
   }, [data]);
 
-  const profileTooltipContent = useCallback((props: TooltipContentProps) => {
-      const { active, payload } = props;
-      if (!active || !payload?.length || !data) return null;
-      const row0 = payload[0]?.payload;
-      const mk = row0?.metricKey as MetricKey | undefined;
-      if (!mk || !(METRIC_KEYS as readonly string[]).includes(mk)) return null;
-      const metricName = METRIC_LABELS[mk];
-      return (
-        <div
-          className="max-w-[260px] rounded-xl border border-[#e8dfd4] bg-white px-3 py-2 text-xs text-nh-brown shadow-sm"
-          style={{ borderRadius: 12 }}
-        >
-          <p className="font-semibold text-nh-brown">{metricName}</p>
-          <ul className="mt-2 space-y-2 text-nh-brown-muted">
-            {payload
-              .filter((entry) => entry.dataKey != null && String(entry.dataKey).length > 0)
-              .map((entry) => {
-                const gid = String(entry.dataKey);
-                const tract = data.series.find((s) => String(s.geoid) === gid);
-              const tname = tract ? String(tract.label ?? tract.geoid) : gid;
-              const ind = rawFor(gid, mk, data.raw_indicators);
-              const rawTxt = ind?.value != null ? formatMetricValue(mk, ind.value) : "—";
-              const natTxt = nationalPercentilePhrase(ind?.percentile_national ?? null);
-              return (
-                <li key={gid} className="leading-snug">
-                  <span className="font-medium text-nh-brown">{tname}</span>
-                  <div className="mt-0.5">
-                    <span className="text-nh-brown">{rawTxt}</span>
-                    <span className="text-nh-brown-muted"> · {natTxt}</span>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      );
-  }, [data]);
 
   const insights = useMemo(
     () =>
@@ -655,49 +602,11 @@ function CompareInner() {
               })}
             </div>
 
-            <div className="mt-10">
-              <div className="rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-sm">
-                <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Profile shape</p>
-                <p className="text-[11px] text-nh-brown-muted">
-                  Each line = one tract; bar position = national percentile rank. Hover a point for raw value and national
-                  rank.
-                </p>
-                <div className="mt-2 h-[360px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={lineData} margin={{ top: 8, right: 8, left: 0, bottom: 56 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e8dfd4" />
-                      <XAxis
-                        dataKey="metric"
-                        tick={{ fontSize: 9, fill: "#5c4033" }}
-                        interval={0}
-                        angle={-35}
-                        textAnchor="end"
-                        height={78}
-                      />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#5c4033" }} width={32} />
-                      <Tooltip
-                        content={profileTooltipContent}
-                        cursor={{ stroke: "#e8dfd4", strokeWidth: 1 }}
-                        wrapperStyle={{ outline: "none" }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      {data.series.map((s, i) => (
-                        <Line
-                          key={String(s.geoid)}
-                          type="monotone"
-                          dataKey={String(s.geoid)}
-                          name={String(s.label ?? s.geoid)}
-                          stroke={LINE_COLORS[i % LINE_COLORS.length]}
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 5 }}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
+            <CompareProfileChart
+              lineData={lineData}
+              series={data.series as Record<string, string | number>[]}
+              raw_indicators={data.raw_indicators}
+            />
 
             <div className="mt-10">
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">

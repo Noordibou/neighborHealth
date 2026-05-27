@@ -38,6 +38,13 @@ export type TractSummary = {
   year: number | null;
 };
 
+export type DisplayIndicator = {
+  metric_name: string;
+  display_name: string;
+  value: number | null;
+  source: string;
+};
+
 export type TractDetail = TractSummary & {
   centroid_lat: number | null;
   centroid_lon: number | null;
@@ -53,6 +60,7 @@ export type TractDetail = TractSummary & {
     percentile_state: number | null;
     percentile_county: number | null;
   }[];
+  display_indicators: DisplayIndicator[];
   risk_score: {
     composite_score: number;
     component_scores: Record<string, number> | null;
@@ -60,6 +68,10 @@ export type TractDetail = TractSummary & {
     rank?: number | null;
     rank_total?: number | null;
   } | null;
+  /** True when ≥2 years of risk_scores exist (enables trend chart). */
+  has_trend?: boolean;
+  /** Weighted sum of state percentile ranks (0–100); state-relative composite. */
+  state_composite_score?: number | null;
 };
 
 export function getTractList(params: Record<string, string | undefined>) {
@@ -72,6 +84,21 @@ export function getTractList(params: Record<string, string | undefined>) {
 
 export function getTract(geoid: string) {
   return api<TractDetail>(`/api/tracts/${geoid}`);
+}
+
+export type TractScorePoint = {
+  year: number;
+  composite_score: number;
+  data_quality_note: string | null;
+};
+
+export type TractScoreTrendPayload = {
+  geoid: string;
+  trend: TractScorePoint[];
+};
+
+export function getTractTrend(geoid: string) {
+  return api<TractScoreTrendPayload>(`/api/tracts/${geoid}/trend`);
 }
 
 export function getTractSummary(geoid: string, refresh = false) {

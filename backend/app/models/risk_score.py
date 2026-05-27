@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
@@ -18,6 +18,6 @@ class RiskScore(Base):
     composite_score: Mapped[float] = mapped_column(Float, index=True)
     component_scores: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     weights_used: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.utcnow())
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     tract = relationship("Tract", back_populates="risk_scores")

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import logging
+import os
 import uuid
 from collections import defaultdict
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, select, tuple_
@@ -14,10 +17,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models import Indicator, RiskScore, Tract, TractDemographics
-from app.services.pdf_export import build_pdf_bytes, write_temp_pdf
+from app.services.pdf_export import build_compare_pdf_bytes, build_pdf_bytes, load_compare_data_for_pdf, write_temp_pdf
 from app.services.risk_score import METRIC_KEYS
+from app.services.score_recalc import resolve_year
 
 router = APIRouter(prefix="/api/export", tags=["export"])
+
+log = logging.getLogger(__name__)
+
+
+async def _delete_after_delay(path: str, delay: float = 5.0) -> None:
+    await asyncio.sleep(delay)
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
 
 
 class PDFBody(BaseModel):
@@ -225,13 +239,6 @@ async def _population_by_geoid(session: AsyncSession, geoids: list[str]) -> dict
     return out
 
 
-async def _year_eff(session: AsyncSession, year: int | None) -> int:
-    if year is not None:
-        return year
-    yq = await session.execute(select(func.max(RiskScore.year)))
-    return yq.scalar() or 2023
-
-
 async def _build_expanded_tract_csv_string(session: AsyncSession, ordered_geoids: list[str]) -> str:
     """Wide-format CSV (header + one row per GEOID in order). Raises HTTPException on missing data."""
     if not ordered_geoids:
@@ -288,6 +295,36 @@ async def export_compare_csv(
     )
 
 
+@router.post("/compare-pdf")
+async def export_compare_pdf(
+    body: CompareCSVBody,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    if len(body.geoids) < 2 or len(body.geoids) > 4:
+        raise HTTPException(422, "Provide 2–4 geoids")
+    try:
+        compare_data = await load_compare_data_for_pdf(
+            session, body.geoids, None
+        )
+        pdf_bytes = await asyncio.wait_for(
+            asyncio.to_thread(build_compare_pdf_bytes, compare_data),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        log.error("Compare PDF generation timed out")
+        raise HTTPException(504, "PDF generation timed out")
+    except Exception as e:
+        log.error("Compare PDF generation failed: %s", e, exc_info=True)
+        raise HTTPException(500, "PDF generation failed")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="neighborhealth-compare.pdf"'
+        },
+    )
+
+
 @router.post("/tract-csv")
 async def export_tract_csv(
     body: TractCSVBody,
@@ -312,7 +349,13 @@ async def export_pdf(
     if not tract:
         raise HTTPException(status_code=404, detail="Tract not found")
     try:
-        data = await build_pdf_bytes(session, body.geoid, body.year)
+        data = await asyncio.wait_for(
+            build_pdf_bytes(session, body.geoid, body.year),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        log.error("PDF generation timed out for geoid=%s", body.geoid)
+        raise HTTPException(504, "PDF generation timed out")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     path = write_temp_pdf(data)
@@ -332,7 +375,7 @@ async def export_tracts_csv(
     year: int | None = None,
 ) -> StreamingResponse:
     """CSV export of filtered tracts (same filters as GET /api/tracts)."""
-    year_eff = await _year_eff(session, year)
+    year_eff = await resolve_year(session, year)
 
     stmt = (
         select(Tract, RiskScore.composite_score)
@@ -374,4 +417,6 @@ async def download_pdf_file(filename: str) -> FileResponse:
     path = base / filename
     if not path.is_file() or path.parent != base.resolve():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, media_type="application/pdf", filename="neighborhealth-report.pdf")
+    response = FileResponse(path, media_type="application/pdf", filename="neighborhealth-report.pdf")
+    asyncio.create_task(_delete_after_delay(str(path)))
+    return response

@@ -3,28 +3,51 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.db.session import get_db
-from app.models import Indicator, RiskScore, Tract
+from app.models import Clinic, Indicator, RiskScore, Tract, TractClinic
 from app.models.demographics import TractDemographics as TractDemographicsRow
 from app.schemas.tract import (
     AISummaryOut,
+    DisplayIndicator,
     IndicatorOut,
+    NearbyClinic,
     RiskScoreOut,
     TractDemographics,
     TractDetail,
     TractListResponse,
     TractScoreDetail,
+    TractScorePoint,
+    TractScoreTrend,
     TractSummary,
 )
 from app.services.ai_service import get_or_create_summary
-from app.services.risk_score import METRIC_KEYS, TractValues, clamp_weights, compute_batch_scores
-from app.services.score_recalc import load_metric_map_for_year
+from app.services.risk_score import DEFAULT_WEIGHTS, METRIC_KEYS, TractValues, clamp_weights, compute_batch_scores
+from app.services.score_recalc import get_cached_default_scores, get_cached_metric_map, resolve_year
 
 router = APIRouter(prefix="/api/tracts", tags=["tracts"])
+
+ACS_2020_SCORE_TREND_NOTE = (
+    "ACS 2020 data has elevated uncertainty due to COVID-19 collection disruptions."
+)
+
+_DISPLAY_INDICATOR_NAMES: dict[str, str] = {
+    "obesity_pct": "Obesity",
+    "depression_pct": "Depression",
+    "cognitive_difficulty_pct": "Cognitive difficulty",
+    "mobility_difficulty_pct": "Mobility difficulty",
+    "smoking_pct": "Current smoking",
+    "dental_visits_pct": "Dental visit rate",
+    "diabetes_pct": "Diabetes",
+    "physical_inactivity_pct": "Physical inactivity",
+    "hypertension_pct": "High blood pressure",
+    "insufficient_sleep_pct": "Insufficient sleep",
+    "all_teeth_lost_pct": "All teeth lost",
+}
+_DISPLAY_ONLY_METRIC_NAMES: frozenset[str] = frozenset(_DISPLAY_INDICATOR_NAMES)
 
 
 def _weights_from_query(**kwargs: float | None) -> dict[str, float] | None:
@@ -39,6 +62,18 @@ async def list_tracts(
     min_score: float = Query(0, ge=0, le=100, description="Minimum composite risk score"),
     min_population: int = Query(0, ge=0, description="Minimum tract population (ACS total on tracts.population)"),
     exclude_institutional: bool = Query(False, description="Exclude tracts flagged as predominantly group quarters"),
+    max_clinic_distance_miles: float | None = Query(
+        None,
+        ge=0,
+        le=500,
+        description="When set, only tracts whose nearest operational FQHC (tract_clinics rank=1) is within this many miles",
+    ),
+    min_clinic_distance_miles: float | None = Query(
+        None,
+        ge=0,
+        le=500,
+        description="When set, only tracts with no nearest clinic within this many miles (care deserts: no rank-1 row or rank-1 distance exceeds threshold)",
+    ),
     min_rent_burden: float | None = None,
     min_uninsured: float | None = None,
     high_asthma: bool | None = None,
@@ -52,10 +87,7 @@ async def list_tracts(
     offset: int = Query(0, ge=0),
 ) -> TractListResponse:
     """Filtered tract list with composite scores; ordered by sort_by (default composite descending)."""
-    year_eff = year
-    if year_eff is None:
-        yq = await session.execute(select(func.max(RiskScore.year)))
-        year_eff = yq.scalar() or 2023
+    year_eff = await resolve_year(session, year)
 
     if sort_by == "housing":
         rent_ind = aliased(Indicator)
@@ -76,16 +108,16 @@ async def list_tracts(
     elif sort_by == "health":
         iu = aliased(Indicator)
         ia = aliased(Indicator)
-        idis = aliased(Indicator)
+        imh = aliased(Indicator)
         blend_num = (
             case((iu.value.is_not(None), iu.value), else_=0)
             + case((ia.value.is_not(None), ia.value), else_=0)
-            + case((idis.value.is_not(None), idis.value), else_=0)
+            + case((imh.value.is_not(None), imh.value), else_=0)
         )
         blend_den = (
             case((iu.value.is_not(None), 1), else_=0)
             + case((ia.value.is_not(None), 1), else_=0)
-            + case((idis.value.is_not(None), 1), else_=0)
+            + case((imh.value.is_not(None), 1), else_=0)
         )
         health_blend = blend_num / func.nullif(blend_den, 0)
         stmt = (
@@ -100,8 +132,8 @@ async def list_tracts(
                 and_(ia.geoid == Tract.geoid, ia.year == year_eff, ia.metric_name == "asthma_pct"),
             )
             .outerjoin(
-                idis,
-                and_(idis.geoid == Tract.geoid, idis.year == year_eff, idis.metric_name == "disability_pct"),
+                imh,
+                and_(imh.geoid == Tract.geoid, imh.year == year_eff, imh.metric_name == "mental_health_pct"),
             )
             .where(RiskScore.composite_score >= min_score)
             .order_by(health_blend.desc().nulls_last(), RiskScore.composite_score.desc())
@@ -149,6 +181,27 @@ async def list_tracts(
         allowed = s if allowed is None else allowed & s
     if allowed is not None:
         stmt = stmt.where(Tract.geoid.in_(allowed))
+
+    if max_clinic_distance_miles is not None:
+        tc1 = aliased(TractClinic)
+        stmt = stmt.join(
+            tc1,
+            and_(
+                tc1.geoid == Tract.geoid,
+                tc1.rank == 1,
+                tc1.distance_miles <= max_clinic_distance_miles,
+            ),
+        )
+    elif min_clinic_distance_miles is not None:
+        has_clinic_within = (
+            select(TractClinic.geoid)
+            .where(
+                TractClinic.rank == 1,
+                TractClinic.distance_miles <= min_clinic_distance_miles,
+            )
+            .distinct()
+        )
+        stmt = stmt.where(~Tract.geoid.in_(has_clinic_within))
 
     id_subq = stmt.with_only_columns(Tract.geoid).order_by(None).subquery()
     total = (await session.execute(select(func.count()).select_from(id_subq))).scalar() or 0
@@ -200,9 +253,15 @@ async def get_tract(
         yq = await session.execute(select(func.max(Indicator.year)).where(Indicator.geoid == geoid))
         year_eff = yq.scalar() or 2023
 
+    n_years = await session.scalar(
+        select(func.count(distinct(RiskScore.year))).where(RiskScore.geoid == geoid)
+    )
+    has_trend = int(n_years or 0) >= 2
+
     ind_res = await session.execute(
         select(Indicator).where(Indicator.geoid == geoid, Indicator.year == year_eff)
     )
+    all_inds = ind_res.scalars().all()
     indicators = [
         IndicatorOut(
             source=i.source,
@@ -214,7 +273,18 @@ async def get_tract(
             percentile_state=i.percentile_state,
             percentile_county=i.percentile_county,
         )
-        for i in ind_res.scalars().all()
+        for i in all_inds
+        if i.metric_name not in _DISPLAY_ONLY_METRIC_NAMES
+    ]
+    display_indicators = [
+        DisplayIndicator(
+            metric_name=i.metric_name,
+            display_name=_DISPLAY_INDICATOR_NAMES.get(i.metric_name, i.metric_name),
+            value=i.value,
+            source=i.source,
+        )
+        for i in all_inds
+        if i.metric_name in _DISPLAY_ONLY_METRIC_NAMES
     ]
 
     rs = await session.get(RiskScore, (geoid, year_eff))
@@ -261,6 +331,16 @@ async def get_tract(
             rank_total=rt,
         )
 
+    ind_by_metric = {i.metric_name: i for i in all_inds}
+    _sc_parts = [
+        DEFAULT_WEIGHTS[m] * (ind_by_metric[m].percentile_state or 50.0)
+        for m in METRIC_KEYS
+        if m in ind_by_metric
+    ]
+    state_composite_score: float | None = (
+        round(max(0.0, min(100.0, sum(_sc_parts))), 4) if _sc_parts else None
+    )
+
     return TractDetail(
         geoid=tract.geoid,
         name=tract.name,
@@ -276,8 +356,91 @@ async def get_tract(
         median_rent=tract.median_rent,
         median_household_income=tract.median_household_income,
         indicators=indicators,
+        display_indicators=display_indicators,
         risk_score=risk_out,
+        has_trend=has_trend,
+        state_composite_score=state_composite_score,
     )
+
+
+@router.get("/{geoid}/clinics", response_model=list[NearbyClinic])
+async def get_tract_nearby_clinics(
+    geoid: str,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> list[NearbyClinic]:
+    """Up to three nearest operational HRSA sites linked to this tract (precomputed distances)."""
+    stmt = (
+        select(
+            Clinic.id,
+            Clinic.name,
+            Clinic.address,
+            Clinic.city,
+            Clinic.zip_code,
+            Clinic.latitude,
+            Clinic.longitude,
+            Clinic.site_type,
+            TractClinic.distance_miles,
+            TractClinic.rank,
+        )
+        .select_from(TractClinic)
+        .join(Clinic, TractClinic.clinic_id == Clinic.id)
+        .where(
+            TractClinic.geoid == geoid,
+            Clinic.is_operational.is_(True),
+        )
+        .order_by(TractClinic.rank.asc())
+        .limit(3)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        NearbyClinic(
+            clinic_id=int(cid),
+            name=str(name),
+            address=address,
+            city=city,
+            zip_code=zip_code,
+            latitude=float(lat),
+            longitude=float(lon),
+            distance_miles=round(float(dist_mi), 2),
+            rank=int(rnk),
+            site_type=site_type,
+        )
+        for cid, name, address, city, zip_code, lat, lon, site_type, dist_mi, rnk in rows
+    ]
+
+
+@router.get("/{geoid}/trend", response_model=TractScoreTrend)
+async def get_tract_score_trend(
+    geoid: str,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> TractScoreTrend:
+    tract = await session.get(Tract, geoid)
+    if tract is None:
+        raise HTTPException(status_code=404, detail="Tract not found")
+
+    rows = (
+        (
+            await session.execute(
+                select(RiskScore.year, RiskScore.composite_score)
+                .where(RiskScore.geoid == geoid)
+                .order_by(RiskScore.year.asc())
+            )
+        )
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="No risk scores for this tract")
+
+    trend: list[TractScorePoint] = []
+    for yr, composite in rows:
+        trend.append(
+            TractScorePoint(
+                year=int(yr),
+                composite_score=float(composite),
+                data_quality_note=ACS_2020_SCORE_TREND_NOTE if int(yr) == 2020 else None,
+            )
+        )
+    return TractScoreTrend(geoid=geoid, trend=trend)
 
 
 @router.get("/{geoid}/demographics", response_model=TractDemographics)
@@ -317,29 +480,46 @@ async def get_tract_score(
     year: int | None = None,
     rent_burden_pct: float | None = None,
     overcrowding_pct: float | None = None,
-    vacancy_rate: float | None = None,
+    structural_vacancy_rate: float | None = None,
     uninsured_pct: float | None = None,
     asthma_pct: float | None = None,
-    disability_pct: float | None = None,
+    mental_health_pct: float | None = None,
     heat_index: float | None = None,
 ) -> TractScoreDetail:
     weights = _weights_from_query(
         rent_burden_pct=rent_burden_pct,
         overcrowding_pct=overcrowding_pct,
-        vacancy_rate=vacancy_rate,
+        structural_vacancy_rate=structural_vacancy_rate,
         uninsured_pct=uninsured_pct,
         asthma_pct=asthma_pct,
-        disability_pct=disability_pct,
+        mental_health_pct=mental_health_pct,
         heat_index=heat_index,
     )
     w = clamp_weights(weights)
 
-    year_eff = year
-    if year_eff is None:
-        yq = await session.execute(select(func.max(RiskScore.year)))
-        year_eff = yq.scalar() or 2023
+    year_eff = await resolve_year(session, year)
 
-    metric_map = await load_metric_map_for_year(session, year_eff)
+    # Component scores are min-max normalized against the full cohort and are
+    # weight-independent, so the cached values are valid for any weight vector.
+    cached_scores = await get_cached_default_scores(session, year_eff)
+    cached_entry = cached_scores.get(geoid)
+
+    if cached_entry is not None:
+        _, component_scores = cached_entry
+        composite = round(
+            max(0.0, min(100.0, sum(w[m] * component_scores[m] for m in METRIC_KEYS))),
+            4,
+        )
+        return TractScoreDetail(
+            geoid=geoid,
+            year=year_eff,
+            composite_score=composite,
+            component_scores=component_scores,
+            weights_used=w,
+        )
+
+    # Fallback: tract not in scores cache (missing core indicators).
+    metric_map = await get_cached_metric_map(session, year_eff)
     cohort = [
         TractValues(geoid=g, values={m: vals.get(m) for m in METRIC_KEYS})
         for g, vals in metric_map.items()
@@ -348,7 +528,6 @@ async def get_tract_score(
     scores = compute_batch_scores(cohort, w)
     if geoid not in scores:
         raise HTTPException(status_code=404, detail="Tract not found or incomplete indicators")
-
     composite, components = scores[geoid]
     return TractScoreDetail(
         geoid=geoid,

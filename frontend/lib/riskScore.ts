@@ -5,10 +5,10 @@
 export const METRIC_KEYS = [
   "rent_burden_pct",
   "overcrowding_pct",
-  "vacancy_rate",
+  "structural_vacancy_rate",
   "uninsured_pct",
   "asthma_pct",
-  "disability_pct",
+  "mental_health_pct",
   "heat_index",
 ] as const;
 
@@ -16,9 +16,15 @@ export type MetricKey = (typeof METRIC_KEYS)[number];
 
 export type TractValues = { geoid: string; values: Record<MetricKey, number | null | undefined> };
 
-const DEFAULT_WEIGHTS: Record<MetricKey, number> = Object.fromEntries(
-  METRIC_KEYS.map((k) => [k, 1 / METRIC_KEYS.length])
-) as Record<MetricKey, number>;
+const DEFAULT_WEIGHTS: Record<MetricKey, number> = {
+  rent_burden_pct:         0.25,
+  uninsured_pct:           0.20,
+  overcrowding_pct:        0.20,
+  mental_health_pct:       0.15,
+  asthma_pct:              0.10,
+  structural_vacancy_rate: 0.05,
+  heat_index:              0.05,
+};
 
 export function clampWeights(weights?: Partial<Record<MetricKey, number>>): Record<MetricKey, number> {
   const w = { ...DEFAULT_WEIGHTS };

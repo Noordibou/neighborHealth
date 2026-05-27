@@ -16,6 +16,15 @@ class IndicatorOut(BaseModel):
     percentile_county: float | None = None
 
 
+class DisplayIndicator(BaseModel):
+    """PLACES indicator stored for clinical context; not included in the composite score."""
+
+    metric_name: str
+    display_name: str
+    value: float | None
+    source: str
+
+
 class RiskScoreOut(BaseModel):
     geoid: str
     year: int
@@ -41,13 +50,27 @@ class TractSummary(BaseModel):
     layer_value: float | None = None
 
 
+class TractScorePoint(BaseModel):
+    year: int
+    composite_score: float
+    data_quality_note: str | None = None
+
+
+class TractScoreTrend(BaseModel):
+    geoid: str
+    trend: list[TractScorePoint]
+
+
 class TractDetail(TractSummary):
     centroid_lat: float | None = None
     centroid_lon: float | None = None
     median_rent: float | None = None
     median_household_income: float | None = None
     indicators: list[IndicatorOut] = Field(default_factory=list)
+    display_indicators: list[DisplayIndicator] = Field(default_factory=list)
     risk_score: RiskScoreOut | None = None
+    has_trend: bool = False
+    state_composite_score: float | None = None
 
 
 class TractDemographics(BaseModel):
@@ -65,6 +88,21 @@ class TractDemographics(BaseModel):
     pct_non_english_home: float | None = None
     pct_foreign_born: float | None = None
     pct_no_hs_diploma: float | None = None
+
+
+class NearbyClinic(BaseModel):
+    """Nearest operational FQHC / look-alike sites for a census tract (from ingest)."""
+
+    clinic_id: int
+    name: str
+    address: str | None
+    city: str | None
+    zip_code: str | None
+    latitude: float
+    longitude: float
+    distance_miles: float
+    rank: int
+    site_type: str | None
 
 
 class TractListResponse(BaseModel):
@@ -154,17 +192,6 @@ class SearchSuggestResponse(BaseModel):
 
 class GeoidsGeoJSONRequest(BaseModel):
     geoids: list[str] = Field(..., min_length=1, max_length=100)
-
-
-class PDFExportRequest(BaseModel):
-    geoid: str
-    include_map: bool = True
-
-
-class PDFExportResponse(BaseModel):
-    job_id: str
-    message: str
-    download_url: str | None = None
 
 
 class UserCreate(BaseModel):

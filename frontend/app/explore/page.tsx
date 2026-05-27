@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { MapRef } from "react-map-gl/maplibre";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrandWordmark } from "@/components/BrandMark";
+import { BivariateLegend } from "@/components/BivariateLegend";
 import { NeighborMap } from "@/components/NeighborMap";
 import {
   API_BASE,
@@ -28,7 +29,10 @@ import {
   serializeExploreMapSession,
 } from "@/lib/exploreMapSession";
 import { isExploreBrowsePlaceholderViewport } from "@/lib/exploreMapPlaceholder";
-import { augmentGeoJSONForMap, type MapLayerMode } from "@/lib/mapGeojson";
+import { applyLayerMode, augmentGeoJSONForYear, type MapLayerMode } from "@/lib/mapGeojson";
+
+/** Explore-only layer tab; map augmentation still uses `MapLayerMode` (overlap → composite for `nh_map_value`). */
+type ExploreLayerMode = MapLayerMode | "overlap";
 
 const STATE_ABBR: Record<string, string> = {
   "42": "PA",
@@ -39,34 +43,47 @@ const STATE_ABBR: Record<string, string> = {
   "17": "IL",
 };
 
-function mapFillLabel(mode: MapLayerMode): string {
+function mapFillLabel(mode: ExploreLayerMode): string {
   if (mode === "composite") return "Priority index — composite";
   if (mode === "housing") return "Housing — rent burden";
-  return "Health — blended uninsured, asthma, disability";
+  if (mode === "health") return "Health — blended uninsured, asthma, mental health";
+  return "Overlap — housing stress × health burden";
 }
 
-const TOP_TRACT_LAYER_HEADING: Record<MapLayerMode, string> = {
+const TOP_TRACT_LAYER_HEADING: Record<ExploreLayerMode, string> = {
   composite: "Composite index",
   housing: "Rent burden",
   health: "Health blend",
+  overlap: "Composite index",
 };
 
-const TOP_TRACT_SORT_HINT: Record<MapLayerMode, string> = {
+const TOP_TRACT_SORT_HINT: Record<ExploreLayerMode, string> = {
   composite: "Sorted by composite housing–health score (highest first).",
   housing: "Sorted by rent burden % (highest first).",
-  health: "Sorted by average of uninsured %, asthma %, and disability % (highest first).",
+  health: "Sorted by average of uninsured %, asthma %, and mental health % (highest first).",
+  overlap: "Sorted by composite housing–health score (highest first).",
 };
 
-function priorityFlagCopy(mode: MapLayerMode): string {
-  if (mode === "composite") return "flagged priority (index ≥ 50)";
+const PRIORITY_THRESHOLDS: Record<ExploreLayerMode, number | null> = {
+  composite: 50,
+  housing: 50,
+  /** Same 0–100-style scale as composite/housing (mean of uninsured %, asthma %, mental health %). */
+  health: 50,
+  overlap: null,
+};
+
+function priorityFlagCopy(mode: ExploreLayerMode): string {
+  if (mode === "composite") return "flagged priority (score ≥ 50)";
   if (mode === "housing") return "flagged priority (rent burden ≥ 50%)";
-  return "flagged priority (health blend ≥ 50)";
+  if (mode === "health") return "flagged priority (health blend ≥ 50)";
+  return "in high-overlap zone (class 3-3)";
 }
 
-const LAYER_SORT_API: Record<MapLayerMode, "composite" | "housing" | "health"> = {
+const LAYER_SORT_API: Record<ExploreLayerMode, "composite" | "housing" | "health"> = {
   composite: "composite",
   housing: "housing",
   health: "health",
+  overlap: "composite",
 };
 
 function paramsEqual(a: URLSearchParams, b: URLSearchParams): boolean {
@@ -85,20 +102,28 @@ function paramsEqual(a: URLSearchParams, b: URLSearchParams): boolean {
 
 function parseExploreUrl(search: string): {
   tract: string | null;
-  layer: MapLayerMode | null;
+  /** Two-digit FIPS from `?state=` when present. */
+  stateFromUrl: string | null;
+  layer: ExploreLayerMode | null;
   minRent: number | null;
   minUninsured: number | null;
   scoreMin: number | undefined;
   popMin: number | undefined;
   exclInst: boolean | undefined;
+  clinicDist: "" | "1" | "2" | "5" | "over5";
   viewport: { lat: number; lng: number; zoom: number } | null;
 } {
   const p = new URLSearchParams(search);
   const tractRaw = p.get("tract")?.trim();
   const tract = tractRaw && /^\d{11}$/.test(tractRaw) ? tractRaw : null;
+  const stateRaw = p.get("state")?.trim();
+  const stateFromUrl =
+    stateRaw && /^\d{2}$/.test(stateRaw.padStart(2).slice(0, 2)) ? stateRaw.padStart(2).slice(0, 2) : null;
   const lr = p.get("layer")?.toLowerCase();
-  const layer: MapLayerMode | null =
-    lr === "housing" || lr === "health" || lr === "composite" ? (lr as MapLayerMode) : null;
+  const layer: ExploreLayerMode | null =
+    lr === "housing" || lr === "health" || lr === "composite" || lr === "overlap"
+      ? (lr as ExploreLayerMode)
+      : null;
   const rentN = Number(p.get("f_rent"));
   const minRent =
     Number.isFinite(rentN) && rentN >= 0 && rentN <= 100 ? Math.round(rentN) : null;
@@ -121,6 +146,12 @@ function parseExploreUrl(search: string): {
     const raw = p.get("excl_inst")?.toLowerCase() ?? "";
     exclInst = raw === "1" || raw === "true";
   }
+  let clinicDist: "" | "1" | "2" | "5" | "over5" = "";
+  if (p.has("clinic_dist")) {
+    const cr = p.get("clinic_dist")?.trim().toLowerCase() ?? "";
+    if (cr === "1" || cr === "2" || cr === "5") clinicDist = cr;
+    else if (cr === "over5") clinicDist = "over5";
+  }
   const lat = Number(p.get("lat"));
   const lng = Number(p.get("lng"));
   const zoom = Number(p.get("zoom"));
@@ -130,19 +161,31 @@ function parseExploreUrl(search: string): {
     Number.isFinite(zoom) && zoom >= 0 && zoom <= 22
       ? { lat, lng, zoom }
       : null;
-  return { tract, layer, minRent, minUninsured, scoreMin, popMin, exclInst, viewport };
+  return {
+    tract,
+    stateFromUrl,
+    layer,
+    minRent,
+    minUninsured,
+    scoreMin,
+    popMin,
+    exclInst,
+    clinicDist,
+    viewport,
+  };
 }
 
 function buildExploreUrlParams(opts: {
   qParam: string | null | undefined;
   stateFips: string | null;
   selectedGeoid: string | null;
-  layerMode: MapLayerMode;
+  layerMode: ExploreLayerMode;
   appliedMinScore: number;
   appliedMinPopulation: number;
   appliedExcludeInstitutional: boolean;
   appliedMinRent: number;
   appliedMinUninsured: number;
+  appliedClinicDist: "" | "1" | "2" | "5" | "over5";
   viewport: { lng: number; lat: number; zoom: number } | null;
 }): URLSearchParams {
   const p = new URLSearchParams();
@@ -153,6 +196,7 @@ function buildExploreUrlParams(opts: {
   if (opts.appliedMinScore > 0) p.set("score_min", String(opts.appliedMinScore));
   if (opts.appliedMinPopulation > 0) p.set("pop_min", String(opts.appliedMinPopulation));
   if (opts.appliedExcludeInstitutional) p.set("excl_inst", "1");
+  if (opts.appliedClinicDist !== "") p.set("clinic_dist", opts.appliedClinicDist);
   if (opts.appliedMinRent > 0) p.set("f_rent", String(opts.appliedMinRent));
   if (opts.appliedMinUninsured > 0) p.set("f_uninsured", String(opts.appliedMinUninsured));
   if (opts.viewport) {
@@ -169,7 +213,7 @@ const SIDEBAR_METRICS: { metric_name: string; label: string }[] = [
   { metric_name: "overcrowding_pct", label: "Overcrowding" },
   { metric_name: "asthma_pct", label: "Asthma prevalence" },
   { metric_name: "uninsured_pct", label: "Uninsured" },
-  { metric_name: "disability_pct", label: "Disability" },
+  { metric_name: "mental_health_pct", label: "Mental health" },
 ];
 
 function indicatorValue(indicators: TractDetail["indicators"], metric_name: string): number | null {
@@ -229,7 +273,7 @@ function ExploreInner() {
     }[]
   >([]);
   const [rankedTotal, setRankedTotal] = useState(0);
-  const [layerMode, setLayerMode] = useState<MapLayerMode>("composite");
+  const [layerMode, setLayerMode] = useState<ExploreLayerMode>("composite");
   const [compareTray, setCompareTray] = useState<string[]>([]);
   const [selectedGeoid, setSelectedGeoid] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<TractDetail | null>(null);
@@ -254,6 +298,7 @@ function ExploreInner() {
     minUninsured: 0,
     asthmaHigh: false,
     urbanRural: "" as "" | "urban" | "rural",
+    clinicDist: "" as "" | "1" | "2" | "5" | "over5",
   });
 
   const exploreMapRef = useRef<MapRef | null>(null);
@@ -391,7 +436,8 @@ function ExploreInner() {
       appliedExcludeInstitutional: applied.excludeInstitutional,
       appliedMinRent: applied.minRent,
       appliedMinUninsured: applied.minUninsured,
-      viewport: viewportForUrl,
+      appliedClinicDist: applied.clinicDist,
+      viewport: stateFips ? viewportForUrl : null,
     });
     const current = new URLSearchParams(window.location.search);
     if (paramsEqual(merged, current)) return;
@@ -411,6 +457,7 @@ function ExploreInner() {
     applied.excludeInstitutional,
     applied.minRent,
     applied.minUninsured,
+    applied.clinicDist,
     viewportForUrl,
   ]);
 
@@ -543,18 +590,22 @@ function ExploreInner() {
     if (parsed.exclInst !== undefined) {
       setApplied((a) => ({ ...a, excludeInstitutional: parsed.exclInst! }));
     }
+    if (parsed.clinicDist) {
+      setApplied((a) => ({ ...a, clinicDist: parsed.clinicDist }));
+    }
     if (parsed.viewport) {
-      const vp = parsed.viewport;
-      const stateFromTract = parsed.tract?.slice(0, 2).padStart(2).slice(0, 2);
-      const stateParamRaw = new URLSearchParams(window.location.search).get("state")?.trim() ?? "";
-      const stateFromParam =
-        stateParamRaw && /^\d{2}$/.test(stateParamRaw.padStart(2).slice(0, 2))
-          ? stateParamRaw.padStart(2).slice(0, 2)
-          : null;
-      const sfForViewport = stateFromTract || stateFromParam || stateFips;
-      if (!isExploreBrowsePlaceholderViewport(sfForViewport, vp)) {
-        setViewportForUrl({ lng: vp.lng, lat: vp.lat, zoom: vp.zoom });
-        setPendingUrlFly(vp);
+      const fromTract = parsed.tract ? parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2) : null;
+      const sfForViewport = fromTract ?? parsed.stateFromUrl ?? stateFips;
+      if (
+        sfForViewport &&
+        !isExploreBrowsePlaceholderViewport(sfForViewport, parsed.viewport)
+      ) {
+        setViewportForUrl({
+          lng: parsed.viewport.lng,
+          lat: parsed.viewport.lat,
+          zoom: parsed.viewport.zoom,
+        });
+        setPendingUrlFly(parsed.viewport);
       }
     }
   }, [sessionReady, clearSearchMap]);
@@ -590,7 +641,7 @@ function ExploreInner() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [pendingUrlFly, sessionReady, mapMode, stateFips, geojson, searchGeojson]);
+  }, [pendingUrlFly, sessionReady]);
 
   useEffect(
     () => () => {
@@ -599,21 +650,25 @@ function ExploreInner() {
     []
   );
 
-  const onExploreMapMoveEnd = useCallback((v: { lng: number; lat: number; zoom: number }) => {
-    if (typeof window !== "undefined" && Date.now() < suppressViewportUrlUntilRef.current) return;
-    pendingViewportRef.current = v;
-    if (viewportDebounceRef.current != null) window.clearTimeout(viewportDebounceRef.current);
-    viewportDebounceRef.current = window.setTimeout(() => {
-      viewportDebounceRef.current = null;
-      const p = pendingViewportRef.current;
-      if (!p) return;
-      setViewportForUrl({
-        lng: Math.round(p.lng * 10000) / 10000,
-        lat: Math.round(p.lat * 10000) / 10000,
-        zoom: Math.round(p.zoom * 10) / 10,
-      });
-    }, 500);
-  }, []);
+  const onExploreMapMoveEnd = useCallback(
+    (v: { lng: number; lat: number; zoom: number }) => {
+      if (typeof window !== "undefined" && Date.now() < suppressViewportUrlUntilRef.current) return;
+      if (mapMode === "browse" && !stateFips) return;
+      pendingViewportRef.current = v;
+      if (viewportDebounceRef.current != null) window.clearTimeout(viewportDebounceRef.current);
+      viewportDebounceRef.current = window.setTimeout(() => {
+        viewportDebounceRef.current = null;
+        const p = pendingViewportRef.current;
+        if (!p) return;
+        setViewportForUrl({
+          lng: Math.round(p.lng * 10000) / 10000,
+          lat: Math.round(p.lat * 10000) / 10000,
+          zoom: Math.round(p.zoom * 10) / 10,
+        });
+      }, 500);
+    },
+    [mapMode, stateFips]
+  );
 
   const clearSearch = useCallback(() => {
     setQ("");
@@ -737,6 +792,10 @@ function ExploreInner() {
     if (applied.minScore > 0) params.min_score = String(Math.round(applied.minScore));
     if (applied.minPopulation > 0) params.min_population = String(applied.minPopulation);
     if (applied.excludeInstitutional) params.exclude_institutional = "true";
+    if (applied.clinicDist === "1") params.max_clinic_distance_miles = "1";
+    else if (applied.clinicDist === "2") params.max_clinic_distance_miles = "2";
+    else if (applied.clinicDist === "5") params.max_clinic_distance_miles = "5";
+    else if (applied.clinicDist === "over5") params.min_clinic_distance_miles = "5";
     if (applied.minRent > 0) params.min_rent_burden = String(applied.minRent);
     if (applied.minUninsured > 0) params.min_uninsured = String(applied.minUninsured);
     if (applied.asthmaHigh) params.high_asthma = "true";
@@ -815,6 +874,7 @@ function ExploreInner() {
       minUninsured: 0,
       asthmaHigh: false,
       urbanRural: "",
+      clinicDist: "",
     }));
   }
 
@@ -826,6 +886,9 @@ function ExploreInner() {
     (fips: string) => {
       const sf = fips.padStart(2, "0").slice(0, 2);
       clearSearchMap();
+      setViewportForUrl(null);
+      setPendingUrlFly(null);
+      suppressViewportUrlUntilRef.current = Date.now() + 2200;
       setStateFips(sf);
       setSelectedGeoid(null);
     },
@@ -864,26 +927,49 @@ function ExploreInner() {
     };
   }, [usStatesGeojson, availableStates]);
 
-  const augmentedBrowse = useMemo(() => {
-    if (!geojson?.features?.length) return null;
-    return augmentGeoJSONForMap(geojson, layerMode);
-  }, [geojson, layerMode]);
+  const mapAugmentMode: MapLayerMode = layerMode === "overlap" ? "composite" : layerMode;
 
-  const augmentedSearch = useMemo(() => {
+  // Layer 1: expensive bivariate sort+classification — runs once when GeoJSON reference changes.
+  const augmentedBrowseBase = useMemo(() => {
+    if (!geojson?.features?.length) return null;
+    return augmentGeoJSONForYear(geojson);
+  }, [geojson]);
+
+  const augmentedSearchBase = useMemo(() => {
     if (!searchGeojson?.features?.length) return null;
-    return augmentGeoJSONForMap(searchGeojson, layerMode);
-  }, [searchGeojson, layerMode]);
+    return augmentGeoJSONForYear(searchGeojson);
+  }, [searchGeojson]);
+
+  // Layer 2: cheap nh_map_value assignment — runs on layer mode switch (O(N) property write).
+  const augmentedBrowse = useMemo(
+    () => applyLayerMode(augmentedBrowseBase, mapAugmentMode),
+    [augmentedBrowseBase, mapAugmentMode]
+  );
+
+  const augmentedSearch = useMemo(
+    () => applyLayerMode(augmentedSearchBase, mapAugmentMode),
+    [augmentedSearchBase, mapAugmentMode]
+  );
 
   const priorityFlagged = useMemo(() => {
     const fc = mapMode === "search" ? augmentedSearch : augmentedBrowse;
     if (!fc?.features?.length) return 0;
+    if (layerMode === "overlap") {
+      let n = 0;
+      for (const f of fc.features) {
+        if (f.properties?.nh_bivariate_class === "3-3") n += 1;
+      }
+      return n;
+    }
+    const threshold = PRIORITY_THRESHOLDS[layerMode];
+    if (threshold === null) return 0;
     let n = 0;
     for (const f of fc.features) {
       const v = f.properties?.nh_map_value;
-      if (typeof v === "number" && v >= 50) n += 1;
+      if (typeof v === "number" && v >= threshold) n += 1;
     }
     return n;
-  }, [mapMode, augmentedBrowse, augmentedSearch]);
+  }, [mapMode, augmentedBrowse, augmentedSearch, layerMode]);
 
   const tractCountOnMap = mapMode === "search" ? augmentedSearch?.features?.length ?? 0 : augmentedBrowse?.features?.length ?? 0;
 
@@ -914,10 +1000,15 @@ function ExploreInner() {
     );
   }
 
-  const layerTabs: { id: MapLayerMode; label: string }[] = [
+  const layerTabs: { id: ExploreLayerMode; label: string; sublabel?: string }[] = [
     { id: "composite", label: "Composite" },
     { id: "housing", label: "Housing" },
     { id: "health", label: "Health" },
+    {
+      id: "overlap",
+      label: "Overlap",
+      sublabel: "Housing stress × Health burden",
+    },
   ];
 
   const mapDataBrowse = augmentedBrowse ?? geojson;
@@ -1143,14 +1234,26 @@ function ExploreInner() {
                   <button
                     key={t.id}
                     type="button"
+                    title={t.sublabel ? `${t.label}: ${t.sublabel}` : t.label}
                     onClick={() => setLayerMode(t.id)}
-                    className={`min-w-0 rounded-full px-3 py-1.5 text-center text-xs font-semibold transition sm:px-4 ${
+                    className={`min-w-0 rounded-full px-2.5 py-1.5 text-center text-xs font-semibold transition sm:px-3 ${
                       layerMode === t.id
                         ? "bg-[#2d2d2d] text-white shadow-sm"
                         : "bg-transparent text-[#5c534c] hover:text-[#2d2d2d]"
                     }`}
                   >
-                    {t.label}
+                    <span className="flex flex-col items-center gap-0 leading-tight">
+                      <span>{t.label}</span>
+                      {t.sublabel ? (
+                        <span
+                          className={`hidden max-w-[7rem] truncate text-[9px] font-normal sm:block ${
+                            layerMode === t.id ? "text-white/75" : "text-[#8e8e8e]"
+                          }`}
+                        >
+                          {t.sublabel}
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1191,11 +1294,18 @@ function ExploreInner() {
                     onSelectTract={onSelectTract}
                     fillProperty="nh_map_value"
                     fillLabel={mapFillLabel(layerMode)}
+                    choroplethStyle={layerMode === "overlap" ? "bivariate" : "ramp"}
+                    suppressBuiltInBivariateLegend={layerMode === "overlap"}
                     showMetricControl={false}
                     selectedGeoid={selectedGeoid}
                     exploreMapRef={exploreMapRef}
                     onExploreMapMoveEnd={onExploreMapMoveEnd}
                   />
+                  {layerMode === "overlap" ? (
+                    <div className="pointer-events-none absolute bottom-10 left-3 z-[15]">
+                      <BivariateLegend />
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -1203,26 +1313,6 @@ function ExploreInner() {
 
           {mapMode === "browse" && (
             <div className="flex min-h-0 flex-1 flex-col gap-2">
-              {stateFips != null && !err && geojson == null && (
-                <div className="flex min-h-[12rem] flex-1 items-center justify-center rounded-xl border border-dashed border-nh-brown/20 bg-white/80 text-sm text-nh-brown-muted">
-                  Loading map data…
-                </div>
-              )}
-              {!stateFips && !err && (
-                <div className="relative flex min-h-0 flex-1 flex-col">
-                  <NeighborMap
-                    stateFips={null}
-                    data={null}
-                    variant="explore"
-                    onSelectTract={onSelectTract}
-                    showMetricControl={false}
-                    statePickerGeoJSON={statePickerGeoJSON}
-                    onSelectStateFips={onSelectStateFromMap}
-                    exploreMapRef={exploreMapRef}
-                    onExploreMapMoveEnd={onExploreMapMoveEnd}
-                  />
-                </div>
-              )}
               {stateFips != null && err ? (
                 <div className="flex min-h-[10rem] flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50/90 px-4 py-6 text-center">
                   <p className="text-sm text-red-700">{err}</p>
@@ -1246,27 +1336,43 @@ function ExploreInner() {
                   </pre>
                 </div>
               )}
-              {stateFips != null && !err && geojson != null && !noData && (
+              {!err && !(stateFips != null && geojson != null && noData) && (
                 <div className="relative flex min-h-0 flex-1 flex-col">
-                  <button
-                    type="button"
-                    onClick={goToUsOverview}
-                    className="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-nh-brown/15 bg-white/95 px-4 py-1.5 text-xs font-semibold text-nh-brown shadow hover:bg-white"
-                  >
-                    ← All states
-                  </button>
+                  {stateFips != null && geojson != null && !noData ? (
+                    <button
+                      type="button"
+                      onClick={goToUsOverview}
+                      className="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-nh-brown/15 bg-white/95 px-4 py-1.5 text-xs font-semibold text-nh-brown shadow hover:bg-white"
+                    >
+                      ← All states
+                    </button>
+                  ) : null}
                   <NeighborMap
                     stateFips={stateFips}
-                    data={mapDataBrowse}
+                    data={stateFips != null && geojson != null && !noData ? mapDataBrowse : null}
                     variant="explore"
                     onSelectTract={onSelectTract}
                     fillProperty="nh_map_value"
                     fillLabel={mapFillLabel(layerMode)}
+                    choroplethStyle={layerMode === "overlap" ? "bivariate" : "ramp"}
+                    suppressBuiltInBivariateLegend={layerMode === "overlap"}
                     showMetricControl={false}
                     selectedGeoid={selectedGeoid}
+                    statePickerGeoJSON={!stateFips ? statePickerGeoJSON : null}
+                    onSelectStateFips={!stateFips ? onSelectStateFromMap : undefined}
                     exploreMapRef={exploreMapRef}
                     onExploreMapMoveEnd={onExploreMapMoveEnd}
                   />
+                  {stateFips != null && geojson == null ? (
+                    <div className="pointer-events-none absolute inset-0 z-20 flex min-h-0 flex-1 items-center justify-center rounded-xl bg-white/75 text-sm font-medium text-nh-brown-muted backdrop-blur-[2px]">
+                      Loading map data…
+                    </div>
+                  ) : null}
+                  {layerMode === "overlap" ? (
+                    <div className="pointer-events-none absolute bottom-10 left-3 z-[15]">
+                      <BivariateLegend />
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -1475,6 +1581,28 @@ function ExploreInner() {
                     <span>Exclude institutional tracts</span>
                   </label>
                   <div>
+                    <label htmlFor="nh-fqhc-access" className="block text-[11px] font-medium text-[#5c534c]">
+                      FQHC access
+                    </label>
+                    <select
+                      id="nh-fqhc-access"
+                      value={applied.clinicDist}
+                      onChange={(e) =>
+                        setApplied((a) => ({
+                          ...a,
+                          clinicDist: e.target.value as "" | "1" | "2" | "5" | "over5",
+                        }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-[#ebe6df] bg-white py-2 pl-3 pr-8 text-sm text-[#2d2d2d] focus:border-[#b34d3a] focus:outline-none focus:ring-1 focus:ring-[#b34d3a]"
+                    >
+                      <option value="">Any</option>
+                      <option value="1">Within 1 mile</option>
+                      <option value="2">Within 2 miles</option>
+                      <option value="5">Within 5 miles</option>
+                      <option value="over5">Over 5 miles</option>
+                    </select>
+                  </div>
+                  <div>
                     <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
                       <span>Rent burden ≥</span>
                       <span>{draft.minRent}%</span>
@@ -1549,7 +1677,9 @@ function ExploreInner() {
                   const rankMetric = r.layer_value ?? r.composite_score;
                   const score = rankMetric != null ? Math.round(rankMetric) : null;
                   const scoreDisplay =
-                    score != null ? `${score}${layerMode === "composite" ? "" : "%"}` : "—";
+                    score != null
+                      ? `${score}${layerMode === "composite" || layerMode === "overlap" ? "" : "%"}`
+                      : "—";
                   const scoreTone =
                     score != null
                       ? score >= 66

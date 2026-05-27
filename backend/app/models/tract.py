@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import Boolean, Float, Index, String, Text
+from sqlalchemy import Boolean, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from geoalchemy2 import Geometry
 
@@ -23,7 +23,7 @@ class Tract(Base):
     centroid_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     median_rent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     median_household_income: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    population: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    population: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_institutional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     geometry: Mapped[object] = mapped_column(
         Geometry(geometry_type="MULTIPOLYGON", srid=4326, spatial_index=False),

@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import Indicator, RiskScore, Tract
+from app.models import Indicator, Tract
 from app.schemas.tract import CompareResponse, IndicatorOut
-from app.services.risk_score import METRIC_KEYS, TractValues, compute_batch_scores
-from app.services.score_recalc import load_metric_map_for_year
+from app.services.risk_score import METRIC_KEYS
+from app.services.score_recalc import get_cached_default_scores, resolve_year
 
 router = APIRouter(prefix="/api/compare", tags=["compare"])
 
@@ -25,18 +25,9 @@ async def compare_tracts(
     if len(parts) < 2 or len(parts) > 4:
         raise HTTPException(status_code=400, detail="Provide between 2 and 4 GEOIDs")
 
-    year_eff = year
-    if year_eff is None:
-        yq = await session.execute(select(func.max(RiskScore.year)))
-        year_eff = yq.scalar() or 2023
+    year_eff = await resolve_year(session, year)
 
-    metric_map = await load_metric_map_for_year(session, year_eff)
-    cohort = [
-        TractValues(geoid=g, values={m: vals.get(m) for m in METRIC_KEYS})
-        for g, vals in metric_map.items()
-        if all(vals.get(m) is not None for m in METRIC_KEYS)
-    ]
-    scores = compute_batch_scores(cohort)
+    scores = await get_cached_default_scores(session, year_eff)
 
     series: list[dict[str, float | str]] = []
     raw: dict[str, list[IndicatorOut]] = {}
@@ -46,7 +37,7 @@ async def compare_tracts(
         if not t:
             raise HTTPException(status_code=404, detail=f"Tract {gid} not found")
         if gid not in scores:
-            raise HTTPException(status_code=400, detail=f"Tract {gid} missing core indicators for year {year_eff}")
+            raise HTTPException(status_code=422, detail=f"Tract {gid} missing core indicators for year {year_eff}")
         _, comp = scores[gid]
         row: dict[str, float | str] = {"geoid": gid, "label": t.name or gid}
         row.update({k: float(comp[k]) for k in METRIC_KEYS})
