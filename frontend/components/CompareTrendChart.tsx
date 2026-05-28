@@ -61,7 +61,7 @@ export function CompareTrendChart({ series }: { series: TractTrendSeries[] }) {
               <XAxis dataKey="year" tick={{ fontSize: 12 }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} width={36} />
               <Tooltip
-                formatter={(value: number) => [Math.round(value), "Composite score"]}
+                formatter={(value) => [Math.round(Number(value ?? 0)), "Composite score"]}
                 labelFormatter={(year) => `Year ${year}`}
               />
               <Legend />

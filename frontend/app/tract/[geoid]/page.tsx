@@ -5,15 +5,7 @@ import { DemographicsPanel } from "@/components/DemographicsPanel";
 import { NearbyClinicPanel } from "@/components/NearbyClinicPanel";
 import { ScorecardActions } from "@/components/ScorecardActions";
 import { SiteFooter } from "@/components/SiteFooter";
-import dynamic from "next/dynamic";
-
-const TrendChart = dynamic(
-  () => import("@/components/TrendChart").then((m) => ({ default: m.TrendChart })),
-  {
-    ssr: false,
-    loading: () => <div className="h-[60px] w-full animate-pulse rounded-md bg-nh-sand" aria-hidden />,
-  }
-);
+import { TrendChartLazy } from "@/components/TrendChartLazy";
 import { TractMapBackControl } from "@/components/TractMapBackControl";
 import { TractScorecardTable } from "@/components/TractScorecardTable";
 import { getTract, getTractSummary } from "@/lib/api";
@@ -143,7 +135,7 @@ export default async function TractPage({ params }: Props) {
               )}
               {(tract.has_trend ?? false) ? (
                 <div className="mt-1 w-full max-w-[min(100%,20rem)] sm:max-w-xs">
-                  <TrendChart geoid={tract.geoid} has_trend={true} />
+                  <TrendChartLazy geoid={tract.geoid} has_trend={true} />
                 </div>
               ) : null}
             </div>

@@ -13,7 +13,7 @@ export default function LandingPage() {
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-nh-brown-muted">
               NeighborHealth combines HUD housing indicators and CDC PLACES health estimates into a composite
-              prioritization index—so outreach teams can see where to focus first.
+              prioritization index so outreach teams can see where to focus first.
             </p>
             <form action="/explore" method="get" className="mt-8">
               <div className="flex flex-col gap-2 rounded-2xl border border-nh-brown/10 bg-white p-1.5 shadow-sm sm:flex-row sm:items-center">
@@ -53,7 +53,6 @@ export default function LandingPage() {
                 { k: "Tracts analyzed", v: "73,056" },
                 { k: "Indicators", v: "18" },
                 { k: "Last refresh", v: "Apr 2024" },
-                { k: "Used by", v: "210 orgs" },
               ].map((row) => (
                 <div key={row.k}>
                   <dt className="text-[10px] font-bold uppercase tracking-wider text-nh-brown-muted">{row.k}</dt>

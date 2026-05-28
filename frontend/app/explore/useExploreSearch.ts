@@ -20,7 +20,6 @@ function looksLikeUsStreetAddress(s: string): boolean {
 
 export function useExploreSearch({
   initialQ,
-  stateFips,
   clearViewport,
   onSelectState,
   setMapMode,
@@ -32,7 +31,6 @@ export function useExploreSearch({
   setSearchZoomKey,
 }: {
   initialQ: string;
-  stateFips: string | null;
   clearViewport: () => void;
   onSelectState: (fips: string) => void;
   setMapMode: (mode: "browse" | "search") => void;

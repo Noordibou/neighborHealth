@@ -204,7 +204,7 @@ export function TrendChart({ geoid, has_trend }: TrendChartProps) {
         {hasFlagged ? " · ○ indicates elevated uncertainty (2020)" : null}
       </p>
 
-      <p className="text-[10px] text-nh-brown-muted/60">Y-axis scaled to this tract's range</p>
+      <p className="text-[10px] text-nh-brown-muted/60">Y-axis scaled to this tract&apos;s range</p>
 
       {shows2020Note && (
         <p className="mt-1 text-[10px] leading-snug text-nh-brown-muted">

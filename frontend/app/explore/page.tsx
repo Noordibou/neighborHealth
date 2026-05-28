@@ -27,7 +27,6 @@ import {
 } from "@/lib/exploreMapSession";
 import { applyLayerMode, augmentGeoJSONForYear, type MapLayerMode } from "@/lib/mapGeojson";
 import { SCORE_THRESHOLDS } from "@/lib/constants";
-import { STATE_FIPS_TO_POSTAL } from "@/lib/geo";
 import { parseExploreUrl, useExploreUrlSync, type ExploreLayerMode } from "./useExploreUrlSync";
 import { useExploreSearch } from "./useExploreSearch";
 
@@ -150,7 +149,6 @@ function ExploreInner() {
     onPickSuggestion,
   } = useExploreSearch({
     initialQ,
-    stateFips,
     clearViewport,
     onSelectState: (fips) => {
       clearSearchMap();
@@ -226,7 +224,7 @@ function ExploreInner() {
     return () => {
       cancelled = true;
     };
-  }, [skipSessionHydrate, initialQ, clearViewport]);
+  }, [skipSessionHydrate, initialQ, clearViewport, setQ, setSearchNarrowFips]);
 
   useEffect(() => {
     setCompareTray(readCompareTray());
@@ -450,7 +448,6 @@ function ExploreInner() {
       availableStates.find((s) => s.state_fips.padStart(2, "0").slice(0, 2) === sf)?.state_name ?? `FIPS ${sf}`
     );
   }, [stateFips, availableStates]);
-  const stateAbbr = stateFips ? STATE_FIPS_TO_POSTAL[stateFips] ?? stateFips : "";
 
   const exploreDataStatus = useMemo(() => {
     const total = availableStates.reduce((sum, st) => sum + st.tract_count, 0);
