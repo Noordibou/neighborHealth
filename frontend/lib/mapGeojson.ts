@@ -76,7 +76,6 @@ function classifyTertile(value: number | null, breaks: [number, number] | null):
 export function augmentGeoJSONForYear(
   fc: GeoJSON.FeatureCollection
 ): GeoJSON.FeatureCollection {
-  console.log("[augmentGeoJSONForYear] computing bivariate classes for", fc.features.length, "features");
   const housingRaws: number[] = [];
   const healthRaws: number[] = [];
 

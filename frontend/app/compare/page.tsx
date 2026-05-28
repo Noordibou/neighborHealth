@@ -5,18 +5,35 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { SiteFooter } from "@/components/SiteFooter";
+import { CollapseChevron } from "@/components/CollapseChevron";
 
 const CompareProfileChart = dynamic(() => import("@/components/CompareProfileChart"), {
   ssr: false,
   loading: () => <div className="mt-10 h-[420px] w-full animate-pulse rounded-2xl bg-nh-sand" />,
 });
-import { getCompare, getTract, type IndicatorRow } from "@/lib/api";
+const CompareTrendChart = dynamic(
+  () => import("@/components/CompareTrendChart").then((m) => ({ default: m.CompareTrendChart })),
+  {
+    ssr: false,
+    loading: () => <div className="mt-6 h-[280px] w-full animate-pulse rounded-2xl bg-nh-sand" />,
+  }
+);
+import {
+  API_BASE,
+  getDemographics,
+  getCompare,
+  getTract,
+  getTractTrend,
+  type IndicatorRow,
+  type TractDemographicsRow,
+} from "@/lib/api";
 import { buildCompareInsights, type CompareDemographicsIncomeMap } from "@/lib/compareInsights";
 import { METRIC_KEYS } from "@/lib/riskScore";
 import { METRIC_LABELS, formatMetricValue } from "@/lib/metricDisplay";
 import type { MetricKey } from "@/lib/riskScore";
-
-const LINE_COLORS = ["#c45c3e", "#2c6e49", "#b8860b", "#2563eb"];
+import { LINE_COLORS } from "@/lib/compareColors";
+import { RACE_SEGMENTS } from "@/lib/demographics";
+import { SCORE_THRESHOLDS } from "@/lib/constants";
 
 /** Solid UI fill from compare chart hex (e.g. tract card swatch at 70% opacity). */
 function hexToRgba(hex: string, alpha: number): string {
@@ -44,57 +61,12 @@ const METRIC_SHORT_LABELS: Record<MetricKey, string> = {
   heat_index: "Heat index",
 };
 
-/**
- * Race/ethnicity bar colors — must match DemographicsPanel.tsx RACE_SEGMENTS barColor values.
- * Compare supports up to 4 tracts; value columns reuse the same min-width table layout as the indicator table.
- */
-const COMPARE_RACE_SEGMENTS: {
-  key: "pct_white" | "pct_black" | "pct_hispanic" | "pct_asian" | "pct_other_race";
-  label: string;
-  barColor: string;
-}[] = [
-  { key: "pct_white", label: "White", barColor: "#f2c49c" },
-  { key: "pct_black", label: "Black", barColor: "#6ec4f0" },
-  { key: "pct_hispanic", label: "Hispanic", barColor: "#8fb88f" },
-  { key: "pct_asian", label: "Asian", barColor: "#eb9a8e" },
-  { key: "pct_other_race", label: "Other", barColor: "#42a8ad" },
-];
 
-type TractDemographicsApiRow = {
-  geoid: string;
-  year: number;
-  total_population: number | null;
-  median_age: number | null;
-  pct_white: number | null;
-  pct_black: number | null;
-  pct_hispanic: number | null;
-  pct_asian: number | null;
-  pct_other_race: number | null;
-  pct_non_english_home: number | null;
-  pct_foreign_born: number | null;
-  pct_no_hs_diploma: number | null;
-};
+type DemographicsEntry =
+  | { status: "absent" }
+  | { status: "error"; message: string }
+  | { status: "ready"; data: TractDemographicsRow; median_household_income: number | null };
 
-type CompareTractContext = {
-  demographics: TractDemographicsApiRow;
-  median_household_income: number | null;
-};
-
-function CollapseChevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      className={`h-5 w-5 shrink-0 text-nh-brown-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-      aria-hidden
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
-  );
-}
 
 function formatMedianIncomeCell(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "—";
@@ -108,11 +80,12 @@ function formatNonEnglishCell(v: number | null | undefined): string {
 
 function buildCollapsedIncomeHint(
   series: ReadonlyArray<Record<string, unknown>>,
-  byGeoid: Record<string, CompareTractContext | null>
+  byGeoid: Record<string, DemographicsEntry>
 ): string | null {
   const amounts: number[] = [];
   for (const s of series) {
-    const inc = byGeoid[String(s.geoid)]?.median_household_income;
+    const entry = byGeoid[String(s.geoid)];
+    const inc = entry?.status === "ready" ? entry.median_household_income : null;
     if (inc == null || !Number.isFinite(inc)) return null;
     amounts.push(inc);
   }
@@ -126,7 +99,7 @@ function buildCollapsedIncomeHint(
   return `Median income: $${Math.round(lo).toLocaleString("en-US", { maximumFractionDigits: 0, useGrouping: true })} – $${Math.round(hi).toLocaleString("en-US", { maximumFractionDigits: 0, useGrouping: true })} (${series.length} tracts)`;
 }
 
-function allRaceFieldsNull(d: TractDemographicsApiRow): boolean {
+function allRaceFieldsNull(d: TractDemographicsRow): boolean {
   return (
     (d.pct_white == null || !Number.isFinite(d.pct_white)) &&
     (d.pct_black == null || !Number.isFinite(d.pct_black)) &&
@@ -136,10 +109,10 @@ function allRaceFieldsNull(d: TractDemographicsApiRow): boolean {
   );
 }
 
-function pluralityRaceLine(d: TractDemographicsApiRow): string | null {
+function pluralityRaceLine(d: TractDemographicsRow): string | null {
   if (allRaceFieldsNull(d)) return null;
   let best: { label: string; v: number } | null = null;
-  for (const seg of COMPARE_RACE_SEGMENTS) {
+  for (const seg of RACE_SEGMENTS) {
     const v = d[seg.key];
     if (v == null || !Number.isFinite(v) || v <= 0) continue;
     if (!best || v > best.v) best = { label: seg.label, v };
@@ -147,9 +120,9 @@ function pluralityRaceLine(d: TractDemographicsApiRow): string | null {
   return best ? `${best.label} ${best.v.toFixed(0)}%` : null;
 }
 
-function RaceInlineBar({ d }: { d: TractDemographicsApiRow }) {
+function RaceInlineBar({ d }: { d: TractDemographicsRow }) {
   if (allRaceFieldsNull(d)) return null;
-  const segs = COMPARE_RACE_SEGMENTS.map((s) => ({ ...s, pct: d[s.key] })).filter(
+  const segs = RACE_SEGMENTS.map((s) => ({ ...s, pct: d[s.key] })).filter(
     (s) => s.pct != null && Number.isFinite(s.pct) && (s.pct as number) > 0
   );
   if (!segs.length) return null;
@@ -166,11 +139,6 @@ function RaceInlineBar({ d }: { d: TractDemographicsApiRow }) {
       ))}
     </div>
   );
-}
-
-function clientApiBase(): string {
-  const t = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").trim().replace(/\/+$/, "");
-  return t || "http://localhost:8000";
 }
 
 function compositeBadge(series: Record<string, number | string>): number | null {
@@ -258,9 +226,14 @@ function CompareInner() {
   const [csvErr, setCsvErr] = useState<string | null>(null);
   const [addInput, setAddInput] = useState("");
   const [indicatorSort, setIndicatorSort] = useState<IndicatorSortMode>("default");
-  const [demographicsByGeoid, setDemographicsByGeoid] = useState<Record<string, CompareTractContext | null>>({});
+  const [demographicsByGeoid, setDemographicsByGeoid] = useState<Record<string, DemographicsEntry>>({});
   const [demographicsLoading, setDemographicsLoading] = useState(false);
   const [populationContextOpen, setPopulationContextOpen] = useState(false);
+  const [trendOpen, setTrendOpen] = useState(false);
+  const [trendByGeoid, setTrendByGeoid] = useState<Record<string, Awaited<ReturnType<typeof getTractTrend>>["trend"] | null>>(
+    {}
+  );
+  const [trendsLoading, setTrendsLoading] = useState(false);
 
   useEffect(() => {
     setIndicatorSort("default");
@@ -295,27 +268,23 @@ function CompareInner() {
     const gids = data.series.map((s) => String(s.geoid));
     void (async () => {
       const entries = await Promise.all(
-        gids.map(async (gid) => {
+        gids.map(async (gid): Promise<readonly [string, DemographicsEntry]> => {
           try {
-            const [demRes, tract] = await Promise.all([
-              fetch(`${clientApiBase()}/api/tracts/${gid}/demographics`, {
-                cache: "no-store",
-                headers: { Accept: "application/json" },
-              }),
+            const [demographics, tract] = await Promise.all([
+              getDemographics(gid),
               getTract(gid).catch(() => null),
             ]);
-            if (!demRes.ok) return [gid, null] as const;
-            const demographics = (await demRes.json()) as TractDemographicsApiRow;
+            if (demographics === null) return [gid, { status: "absent" }] as const;
             const median_household_income = tract?.median_household_income ?? null;
-            return [gid, { demographics, median_household_income }] as const;
-          } catch {
-            return [gid, null] as const;
+            return [gid, { status: "ready", data: demographics, median_household_income }] as const;
+          } catch (err) {
+            return [gid, { status: "error", message: err instanceof Error ? err.message : "Failed to load" }] as const;
           }
         })
       );
       if (cancelled) return;
-      const next: Record<string, CompareTractContext | null> = {};
-      for (const [gid, row] of entries) next[gid] = row;
+      const next: Record<string, DemographicsEntry> = {};
+      for (const [gid, entry] of entries) next[gid] = entry;
       setDemographicsByGeoid(next);
       setDemographicsLoading(false);
     })();
@@ -324,13 +293,48 @@ function CompareInner() {
     };
   }, [data]);
 
+  useEffect(() => {
+    if (!data?.series?.length) {
+      setTrendByGeoid({});
+      setTrendsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setTrendsLoading(true);
+    const gids = data.series.map((s) => String(s.geoid));
+    void Promise.all(gids.map((g) => getTractTrend(g).catch(() => null))).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, Awaited<ReturnType<typeof getTractTrend>>["trend"] | null> = {};
+      gids.forEach((g, i) => {
+        next[g] = results[i]?.trend ?? null;
+      });
+      setTrendByGeoid(next);
+      setTrendsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
+
+  const trendSeries = useMemo(() => {
+    if (!data?.series?.length) return [];
+    return data.series.map((s) => {
+      const geoid = String(s.geoid);
+      return {
+        geoid,
+        label: String(s.label ?? s.geoid),
+        trend: trendByGeoid[geoid] ?? null,
+      };
+    });
+  }, [data, trendByGeoid]);
+
   const incomeMapForInsights = useMemo((): CompareDemographicsIncomeMap => {
     if (!data || demographicsLoading) return {};
     const m: CompareDemographicsIncomeMap = {};
     for (const s of data.series) {
       const gid = String(s.geoid);
-      const ctx = demographicsByGeoid[gid];
-      m[gid] = ctx ? { median_household_income: ctx.median_household_income } : null;
+      const entry = demographicsByGeoid[gid];
+      m[gid] = entry?.status === "ready" ? { median_household_income: entry.median_household_income } : null;
     }
     return m;
   }, [data, demographicsByGeoid, demographicsLoading]);
@@ -374,7 +378,7 @@ function CompareInner() {
     setCsvErr(null);
     setCsvLoading(true);
     try {
-      const res = await fetch(`${clientApiBase()}/api/export/compare-csv`, {
+      const res = await fetch(`${API_BASE}/api/export/compare-csv`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ geoids }),
@@ -406,7 +410,7 @@ function CompareInner() {
     setPdfErr(null);
     setPdfLoading(true);
     try {
-      const res = await fetch(`${clientApiBase()}/api/export/compare-pdf`, {
+      const res = await fetch(`${API_BASE}/api/export/compare-pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ geoids }),
@@ -455,28 +459,39 @@ function CompareInner() {
         <div className="mx-auto max-w-2xl px-4 py-14">
           <h1 className="font-display text-3xl font-semibold text-nh-brown">Compare tracts</h1>
           <p className="mt-3 text-nh-brown-muted">
-            Add at least two to load charts, the indicator table, and exports.
+            Add at least two tracts to load charts, the indicator table, and exports.
           </p>
-          <div className="mt-8 flex flex-wrap gap-2">
-            <input
-              className="min-w-[200px] flex-1 rounded-xl border border-nh-brown/15 bg-white px-3 py-2.5 text-sm text-nh-brown"
-              placeholder="11-digit GEOID"
-              value={addInput}
-              onChange={(e) => setAddInput(e.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => addGeoid()}
-              className="rounded-xl bg-nh-brown px-5 py-2.5 text-sm font-semibold text-nh-cream hover:bg-nh-brown/90"
+          <div className="mt-8">
+            <Link
+              href="/explore"
+              className="inline-flex items-center gap-2 rounded-full bg-nh-brown px-6 py-3 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
             >
-              Add tract
-            </button>
-          </div>
-          <p className="mt-8">
-            <Link href="/explore" className="text-sm font-semibold text-nh-terracotta hover:underline">
-              ← Back to map
+              ← Open map explorer
             </Link>
-          </p>
+            <p className="mt-3 text-xs text-nh-brown-muted">
+              Select tracts on the map and use the compare tray to open this page.
+            </p>
+          </div>
+          <div className="mt-8 border-t border-nh-brown/10 pt-6">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">
+              Or enter a Census tract ID directly
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                className="min-w-[200px] flex-1 rounded-xl border border-nh-brown/15 bg-white px-3 py-2.5 text-sm text-nh-brown"
+                placeholder="11-digit Census tract ID"
+                value={addInput}
+                onChange={(e) => setAddInput(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => addGeoid()}
+                className="rounded-xl bg-nh-brown px-5 py-2.5 text-sm font-semibold text-nh-cream hover:bg-nh-brown/90"
+              >
+                Add tract
+              </button>
+            </div>
+          </div>
         </div>
         <SiteFooter />
       </div>
@@ -535,7 +550,7 @@ function CompareInner() {
           <div className="flex flex-wrap items-center gap-2">
             <input
               className="min-w-[140px] rounded-full border border-nh-brown/15 bg-white px-3 py-2 text-sm"
-              placeholder="Add GEOID"
+              placeholder="Add Census tract ID"
               value={addInput}
               onChange={(e) => setAddInput(e.target.value)}
               disabled={geoids.length >= 4}
@@ -553,7 +568,7 @@ function CompareInner() {
 
         {geoids.length === 1 && (
           <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            Add a second GEOID to load the comparison.
+            Add a second Census tract ID to load the comparison.
           </p>
         )}
 
@@ -564,7 +579,7 @@ function CompareInner() {
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {data.series.map((s, i) => {
                 const badge = compositeBadge(s as Record<string, number | string>);
-                const flag = badge != null && badge >= 55 ? "Priority" : "Stable";
+                const flag = badge != null && badge >= SCORE_THRESHOLDS.priorityBadge ? "Priority" : "Stable";
                 return (
                   <div key={String(s.geoid)} className="relative rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-sm">
                     <button
@@ -607,6 +622,29 @@ function CompareInner() {
               series={data.series as Record<string, string | number>[]}
               raw_indicators={data.raw_indicators}
             />
+
+            <details
+              open={trendOpen}
+              onToggle={(e) => setTrendOpen(e.currentTarget.open)}
+              className="mt-10 overflow-hidden rounded-2xl border border-nh-brown/10 bg-white shadow-sm [&_summary::-webkit-details-marker]:hidden"
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-nh-brown/10 bg-nh-cream/80 px-4 py-3 transition hover:bg-nh-cream/60">
+                <span className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">
+                  Score trend (2020–2024)
+                </span>
+                <CollapseChevron isOpen={trendOpen} />
+              </summary>
+              <div>
+                <p className="border-b border-nh-brown/5 px-4 py-2 text-[11px] text-nh-brown-muted">
+                  Score trend comparison — composite index by year (0–100 scale).
+                </p>
+                {trendsLoading ? (
+                  <div className="mx-4 my-6 h-[280px] animate-pulse rounded-2xl bg-nh-sand" />
+                ) : (
+                  <CompareTrendChart series={trendSeries} />
+                )}
+              </div>
+            </details>
 
             <div className="mt-10">
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -708,7 +746,7 @@ function CompareInner() {
                     <span className="text-xs font-normal normal-case text-nh-brown-muted">{collapsedIncomeHint}</span>
                   ) : null}
                 </div>
-                <CollapseChevron open={populationContextOpen} />
+                <CollapseChevron isOpen={populationContextOpen} />
               </summary>
               <div className="px-0 pb-0 pt-0">
                 <div className="overflow-x-auto">
@@ -716,37 +754,47 @@ function CompareInner() {
                     <tbody>
                       <tr className="border-b border-nh-brown/5">
                         <td className="px-4 py-3 font-medium text-nh-brown-muted">Median income</td>
-                        {data.series.map((s) => (
-                          <td key={`inc-${s.geoid}`} className="min-w-[200px] px-4 py-3">
-                            {demographicsLoading ? (
-                              <div className="h-4 max-w-[100px] animate-pulse rounded bg-nh-sand" />
-                            ) : (
-                              <span className="font-semibold tabular-nums text-nh-brown">
-                                {formatMedianIncomeCell(demographicsByGeoid[String(s.geoid)]?.median_household_income)}
-                              </span>
-                            )}
-                          </td>
-                        ))}
+                        {data.series.map((s) => {
+                          const entry = demographicsByGeoid[String(s.geoid)];
+                          return (
+                            <td key={`inc-${s.geoid}`} className="min-w-[200px] px-4 py-3">
+                              {demographicsLoading ? (
+                                <div className="h-4 max-w-[100px] animate-pulse rounded bg-nh-sand" />
+                              ) : entry?.status === "error" ? (
+                                <span className="rounded bg-amber-50 px-1 text-xs text-amber-700">Failed to load</span>
+                              ) : (
+                                <span className="font-semibold tabular-nums text-nh-brown">
+                                  {formatMedianIncomeCell(entry?.status === "ready" ? entry.median_household_income : null)}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
                       </tr>
                       <tr className="border-b border-nh-brown/5">
                         <td className="px-4 py-3 font-medium text-nh-brown-muted">Non-English at home</td>
-                        {data.series.map((s) => (
-                          <td key={`ne-${s.geoid}`} className="min-w-[200px] px-4 py-3">
-                            {demographicsLoading ? (
-                              <div className="h-4 max-w-[72px] animate-pulse rounded bg-nh-sand" />
-                            ) : (
-                              <span className="font-semibold tabular-nums text-nh-brown">
-                                {formatNonEnglishCell(demographicsByGeoid[String(s.geoid)]?.demographics?.pct_non_english_home)}
-                              </span>
-                            )}
-                          </td>
-                        ))}
+                        {data.series.map((s) => {
+                          const entry = demographicsByGeoid[String(s.geoid)];
+                          return (
+                            <td key={`ne-${s.geoid}`} className="min-w-[200px] px-4 py-3">
+                              {demographicsLoading ? (
+                                <div className="h-4 max-w-[72px] animate-pulse rounded bg-nh-sand" />
+                              ) : entry?.status === "error" ? (
+                                <span className="rounded bg-amber-50 px-1 text-xs text-amber-700">Failed to load</span>
+                              ) : (
+                                <span className="font-semibold tabular-nums text-nh-brown">
+                                  {formatNonEnglishCell(entry?.status === "ready" ? entry.data.pct_non_english_home : null)}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
                       </tr>
                       <tr className="border-b border-nh-brown/5">
                         <td className="px-4 py-3 font-medium text-nh-brown-muted">Race / ethnicity</td>
                         {data.series.map((s) => {
-                          const ctx = demographicsByGeoid[String(s.geoid)];
-                          const d = ctx?.demographics;
+                          const entry = demographicsByGeoid[String(s.geoid)];
+                          const d = entry?.status === "ready" ? entry.data : undefined;
                           return (
                             <td key={`race-${s.geoid}`} className="min-w-[200px] px-4 py-3">
                               {demographicsLoading ? (
@@ -754,9 +802,9 @@ function CompareInner() {
                                   <div className="h-2 w-full max-w-[200px] animate-pulse rounded-sm bg-nh-sand" />
                                   <div className="h-3 max-w-[88px] animate-pulse rounded bg-nh-cream-dark" />
                                 </div>
-                              ) : !d ? (
-                                <span className="text-nh-brown-muted">—</span>
-                              ) : allRaceFieldsNull(d) ? (
+                              ) : entry?.status === "error" ? (
+                                <span className="rounded bg-amber-50 px-1 text-xs text-amber-700">Failed to load</span>
+                              ) : !d || allRaceFieldsNull(d) ? (
                                 <span className="text-nh-brown-muted">—</span>
                               ) : (
                                 <div className="flex flex-col gap-1.5">

@@ -3,14 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { addToCompareTray, readCompareTray } from "@/lib/compareTray";
-import { postPdfExport } from "@/lib/api";
+import { API_BASE, postPdfExport } from "@/lib/api";
 
-function clientApiBase(): string {
-  const t = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").trim().replace(/\/+$/, "");
-  return t || "http://localhost:8000";
-}
-
-export function ScorecardActions({ geoid, apiBase }: { geoid: string; apiBase: string }) {
+export function ScorecardActions({ geoid }: { geoid: string }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [compareHint, setCompareHint] = useState<string | null>(null);
@@ -21,7 +16,7 @@ export function ScorecardActions({ geoid, apiBase }: { geoid: string; apiBase: s
     setMsg(null);
     try {
       const r = await postPdfExport(geoid);
-      const url = r.download_url.startsWith("http") ? r.download_url : `${apiBase}${r.download_url}`;
+      const url = r.download_url.startsWith("http") ? r.download_url : `${API_BASE}${r.download_url}`;
       window.open(url, "_blank");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "PDF failed");
@@ -34,7 +29,7 @@ export function ScorecardActions({ geoid, apiBase }: { geoid: string; apiBase: s
     setCsvErr(null);
     setCsvLoading(true);
     try {
-      const res = await fetch(`${clientApiBase()}/api/export/tract-csv`, {
+      const res = await fetch(`${API_BASE}/api/export/tract-csv`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ geoid: g }),

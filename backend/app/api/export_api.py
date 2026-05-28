@@ -16,10 +16,15 @@ from sqlalchemy import and_, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import Indicator, RiskScore, Tract, TractDemographics
+from app.models import Indicator, RiskScore, Tract, TractClinic, TractDemographics
 from app.services.pdf_export import build_compare_pdf_bytes, build_pdf_bytes, load_compare_data_for_pdf, write_temp_pdf
 from app.services.risk_score import METRIC_KEYS
 from app.services.score_recalc import resolve_year
+from app.services.tract_list_filters import (
+    TractListFilterParams,
+    apply_tract_list_filters,
+    build_list_tracts_select,
+)
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -364,6 +369,138 @@ async def export_pdf(
         job_id=job_id,
         message="PDF ready",
         download_url=f"/api/export/pdf/file/{path.name}",
+    )
+
+
+_FILTERED_EXPORT_METRICS = (
+    "rent_burden_pct",
+    "uninsured_pct",
+    "asthma_pct",
+    "mental_health_pct",
+)
+
+
+def _filtered_tract_csv_headers() -> list[str]:
+    return [
+        "geoid",
+        "name",
+        "county_name",
+        "state_fips",
+        "composite_score",
+        "rent_burden_pct",
+        "uninsured_pct",
+        "asthma_pct",
+        "mental_health_pct",
+        "nearest_clinic_miles",
+        "median_household_income",
+        "population",
+    ]
+
+
+async def _indicator_values_by_geoid(
+    session: AsyncSession, geoids: list[str], year_eff: int, metric_names: tuple[str, ...]
+) -> dict[str, dict[str, float | None]]:
+    if not geoids:
+        return {}
+    out: dict[str, dict[str, float | None]] = defaultdict(dict)
+    q = await session.execute(
+        select(Indicator).where(
+            Indicator.geoid.in_(geoids),
+            Indicator.year == year_eff,
+            Indicator.metric_name.in_(metric_names),
+        )
+    )
+    for row in q.scalars():
+        out[row.geoid][row.metric_name] = float(row.value) if row.value is not None else None
+    return dict(out)
+
+
+async def _nearest_clinic_miles_by_geoid(session: AsyncSession, geoids: list[str]) -> dict[str, float | None]:
+    if not geoids:
+        return {}
+    q = await session.execute(
+        select(TractClinic.geoid, TractClinic.distance_miles).where(
+            TractClinic.geoid.in_(geoids),
+            TractClinic.rank == 1,
+        )
+    )
+    return {g: float(d) if d is not None else None for g, d in q.all()}
+
+
+@router.get("/filtered-tracts")
+async def export_filtered_tracts_csv(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    state_fips: str | None = Query(None, description="2-digit state FIPS"),
+    min_score: float = Query(0, ge=0, le=100),
+    min_population: int = Query(0, ge=0),
+    exclude_institutional: bool = Query(False),
+    min_rent_burden: float | None = Query(None),
+    min_uninsured: float | None = Query(None),
+    high_asthma: bool | None = Query(None),
+    max_clinic_dist: float | None = Query(
+        None, ge=0, le=500, description="Max miles to nearest FQHC (rank 1)"
+    ),
+    min_clinic_dist: float | None = Query(
+        None, ge=0, le=500, description="Care desert: no clinic within this many miles"
+    ),
+    year: int | None = None,
+) -> StreamingResponse:
+    """CSV of all tracts matching explore/list filters (no pagination cap)."""
+    year_eff = await resolve_year(session, year)
+    max_clinic_distance_miles = max_clinic_dist
+    min_clinic_distance_miles = min_clinic_dist
+
+    filter_params = TractListFilterParams(
+        year_eff=year_eff,
+        state=state_fips,
+        min_score=min_score,
+        min_population=min_population,
+        exclude_institutional=exclude_institutional,
+        max_clinic_distance_miles=max_clinic_distance_miles,
+        min_clinic_distance_miles=min_clinic_distance_miles,
+        min_rent_burden=min_rent_burden,
+        min_uninsured=min_uninsured,
+        high_asthma=high_asthma,
+        urban_rural=None,
+        sort_by="composite",
+    )
+    stmt = build_list_tracts_select(filter_params)
+    stmt = await apply_tract_list_filters(session, stmt, filter_params)
+    res = await session.execute(stmt)
+    rows = list(res.all())
+
+    geoids = [tract.geoid for tract, _ in rows]
+    ind_by_geoid = await _indicator_values_by_geoid(session, geoids, year_eff, _FILTERED_EXPORT_METRICS)
+    clinic_by_geoid = await _nearest_clinic_miles_by_geoid(session, geoids)
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(_filtered_tract_csv_headers())
+    for tract, score in rows:
+        im = ind_by_geoid.get(tract.geoid, {})
+        clinic_mi = clinic_by_geoid.get(tract.geoid)
+        w.writerow(
+            [
+                tract.geoid,
+                tract.name or "",
+                tract.county_name or "",
+                str(tract.state_fips).zfill(2),
+                _fmt_composite(score),
+                _fmt_metric_value(im.get("rent_burden_pct")),
+                _fmt_metric_value(im.get("uninsured_pct")),
+                _fmt_metric_value(im.get("asthma_pct")),
+                _fmt_metric_value(im.get("mental_health_pct")),
+                _fmt_metric_value(clinic_mi),
+                _fmt_int_field(tract.median_household_income),
+                _fmt_int_field(tract.population),
+            ]
+        )
+    buf.seek(0)
+    csv_body = buf.getvalue().rstrip("\r\n")
+    return StreamingResponse(
+        iter([csv_body]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="neighborhealth-filtered-tracts.csv"'},
     )
 
 

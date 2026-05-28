@@ -15,29 +15,28 @@ const TrendChart = dynamic(
   }
 );
 import { TractMapBackControl } from "@/components/TractMapBackControl";
-import { TractMetricGrid } from "@/components/TractMetricGrid";
 import { TractScorecardTable } from "@/components/TractScorecardTable";
-import { API_BASE, getTract, getTractSummary } from "@/lib/api";
+import { getTract, getTractSummary } from "@/lib/api";
+import { SCORE_THRESHOLDS } from "@/lib/constants";
+import { STATE_FIPS_TO_POSTAL } from "@/lib/geo";
 
 type Props = { params: Promise<{ geoid: string }> };
 
-const STATE_ABBR: Record<string, string> = {
-  "42": "PA",
-  "06": "CA",
-  "48": "TX",
-  "36": "NY",
-  "12": "FL",
-  "17": "IL",
-};
 
 export default async function TractPage({ params }: Props) {
   const { geoid } = await params;
   let tract: Awaited<ReturnType<typeof getTract>> | null = null;
   let unavailableMessage: string | null = null;
-  try {
-    tract = await getTract(geoid);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
+
+  const [tractResult, summaryResult] = await Promise.allSettled([
+    getTract(geoid),
+    getTractSummary(geoid),
+  ]);
+
+  if (tractResult.status === "fulfilled") {
+    tract = tractResult.value;
+  } else {
+    const msg = tractResult.reason instanceof Error ? tractResult.reason.message : String(tractResult.reason);
     // Only show Next.js 404 when the backend confirms tract is missing.
     if (msg.startsWith("404")) {
       notFound();
@@ -71,19 +70,15 @@ export default async function TractPage({ params }: Props) {
     );
   }
 
-  let summary: { summary_text: string; generated_at: string } | null = null;
-  try {
-    summary = await getTractSummary(geoid);
-  } catch {
-    summary = null;
-  }
+  const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
 
   const score = tract.risk_score?.composite_score;
   const scoreRounded = score != null ? Math.round(score) : null;
-  const st = tract.state_fips ? STATE_ABBR[tract.state_fips] ?? tract.state_fips : "";
+  const st = tract.state_fips ? STATE_FIPS_TO_POSTAL[tract.state_fips] ?? tract.state_fips : "";
   const place =
     tract.county_name && st ? `${tract.county_name}, ${st}` : [tract.county_name, st].filter(Boolean).join(", ");
-  const tier = scoreRounded != null && scoreRounded >= 70 ? "Tier 1" : scoreRounded != null && scoreRounded >= 50 ? "Tier 2" : "Tier 3";
+  const tier = scoreRounded != null && scoreRounded >= SCORE_THRESHOLDS.tier1 ? "Tier 1" : scoreRounded != null && scoreRounded >= SCORE_THRESHOLDS.tier2 ? "Tier 2" : "Tier 3";
+  const tierLabel = scoreRounded != null ? (scoreRounded >= SCORE_THRESHOLDS.tier1 ? "high" : scoreRounded >= SCORE_THRESHOLDS.tier2 ? "moderate" : "lower") : null;
 
   return (
     <div className="min-h-screen bg-nh-cream text-nh-brown">
@@ -98,7 +93,7 @@ export default async function TractPage({ params }: Props) {
             Year {tract.risk_score?.year ?? "—"}
           </span>
           <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown-muted">
-            GEOID {tract.geoid}
+            Tract ID {tract.geoid}
           </span>
           {tract.median_rent != null ? (
             <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium">
@@ -123,20 +118,24 @@ export default async function TractPage({ params }: Props) {
                 <>
                   <div
                     className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
-                    aria-label={`Composite score ${scoreRounded}`}
+                    aria-label={`Composite score ${scoreRounded} out of 100`}
                   >
                     <div className="text-center">
                       <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
                       <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
+                      <p className="text-[9px] text-nh-brown-muted">out of 100</p>
                     </div>
                   </div>
+                  <p className="text-center text-[11px] text-nh-brown-muted sm:text-left">
+                    Higher score = greater burden
+                  </p>
                   {tract.risk_score?.rank != null && tract.risk_score.rank_total != null ? (
-                    <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left md:ml-6">
-                      Rank {tract.risk_score.rank} / {tract.risk_score.rank_total}
+                    <p className="text-center text-[11px] font-medium text-nh-brown-muted sm:text-left">
+                      Ranks #{tract.risk_score.rank} of {tract.risk_score.rank_total.toLocaleString()} nationally
                     </p>
                   ) : null}
                   {tract.state_composite_score != null ? (
-                    <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left md:ml-6">
+                    <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left">
                       State score {Math.round(tract.state_composite_score)}
                     </p>
                   ) : null}
@@ -153,16 +152,16 @@ export default async function TractPage({ params }: Props) {
               <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-nh-brown md:text-4xl">
                 {tract.name ?? `Tract ${tract.geoid}`}
               </h1>
-              <p className="mt-2 text-lg text-nh-brown-muted">{place || `GEOID ${tract.geoid}`}</p>
+              <p className="mt-2 text-lg text-nh-brown-muted">{place || `Tract ID ${tract.geoid}`}</p>
               <p className="mt-4 max-w-2xl text-sm leading-relaxed text-nh-brown-muted">
-                This tract ranks in the upper tier on the composite housing–health index when benchmarked against peers
-                with full indicator coverage. Open compare from the map explorer to contrast nearby areas, or export a
-                PDF for stakeholders.
+                {scoreRounded != null && tierLabel
+                  ? `This tract's composite score of ${scoreRounded} places it in the ${tierLabel} burden tier nationally.`
+                  : "Open compare from the map explorer to contrast nearby areas, or export a PDF for stakeholders."}
               </p>
             </div>
           </div>
           <div className="shrink-0 lg:pt-2">
-            <ScorecardActions geoid={tract.geoid} apiBase={API_BASE} />
+            <ScorecardActions geoid={tract.geoid} />
           </div>
         </div>
 
@@ -181,13 +180,6 @@ export default async function TractPage({ params }: Props) {
         <NearbyClinicPanel geoid={tract.geoid} />
 
         <AdditionalIndicatorsPanel indicators={tract.display_indicators ?? []} />
-
-        <section className="mt-12">
-          <h2 className="font-display text-xl font-semibold text-nh-brown">Metric cards</h2>
-          <div className="mt-4">
-            <TractMetricGrid tract={tract} />
-          </div>
-        </section>
 
         <AISummaryPanel
           summaryText={summary?.summary_text ?? null}

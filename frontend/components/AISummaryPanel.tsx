@@ -14,8 +14,7 @@ export function AISummaryPanel({
       <section className="mt-10 rounded-2xl border border-nh-brown/10 bg-white p-6 shadow-sm">
         <h2 className="font-display text-lg font-semibold text-nh-brown">Neighborhood narrative</h2>
         <p className="mt-3 text-sm leading-relaxed text-nh-brown-muted">
-          Summary unavailable. Configure <code className="rounded bg-nh-cream px-1 text-xs">ANTHROPIC_API_KEY</code> on the
-          API to generate narrative insights from tract indicators.
+          Neighborhood narrative is not available for this tract.
         </p>
       </section>
     );

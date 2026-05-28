@@ -3,10 +3,8 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, case, distinct, func, select
+from sqlalchemy import and_, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
-
 from app.db.session import get_db
 from app.models import Clinic, Indicator, RiskScore, Tract, TractClinic
 from app.models.demographics import TractDemographics as TractDemographicsRow
@@ -27,6 +25,11 @@ from app.schemas.tract import (
 from app.services.ai_service import get_or_create_summary
 from app.services.risk_score import DEFAULT_WEIGHTS, METRIC_KEYS, TractValues, clamp_weights, compute_batch_scores
 from app.services.score_recalc import get_cached_default_scores, get_cached_metric_map, resolve_year
+from app.services.tract_list_filters import (
+    TractListFilterParams,
+    apply_tract_list_filters,
+    build_list_tracts_select,
+)
 
 router = APIRouter(prefix="/api/tracts", tags=["tracts"])
 
@@ -89,119 +92,22 @@ async def list_tracts(
     """Filtered tract list with composite scores; ordered by sort_by (default composite descending)."""
     year_eff = await resolve_year(session, year)
 
-    if sort_by == "housing":
-        rent_ind = aliased(Indicator)
-        stmt = (
-            select(Tract, RiskScore.composite_score, rent_ind.value)
-            .join(RiskScore, and_(RiskScore.geoid == Tract.geoid, RiskScore.year == year_eff))
-            .outerjoin(
-                rent_ind,
-                and_(
-                    rent_ind.geoid == Tract.geoid,
-                    rent_ind.year == year_eff,
-                    rent_ind.metric_name == "rent_burden_pct",
-                ),
-            )
-            .where(RiskScore.composite_score >= min_score)
-            .order_by(rent_ind.value.desc().nulls_last(), RiskScore.composite_score.desc())
-        )
-    elif sort_by == "health":
-        iu = aliased(Indicator)
-        ia = aliased(Indicator)
-        imh = aliased(Indicator)
-        blend_num = (
-            case((iu.value.is_not(None), iu.value), else_=0)
-            + case((ia.value.is_not(None), ia.value), else_=0)
-            + case((imh.value.is_not(None), imh.value), else_=0)
-        )
-        blend_den = (
-            case((iu.value.is_not(None), 1), else_=0)
-            + case((ia.value.is_not(None), 1), else_=0)
-            + case((imh.value.is_not(None), 1), else_=0)
-        )
-        health_blend = blend_num / func.nullif(blend_den, 0)
-        stmt = (
-            select(Tract, RiskScore.composite_score, health_blend.label("health_blend"))
-            .join(RiskScore, and_(RiskScore.geoid == Tract.geoid, RiskScore.year == year_eff))
-            .outerjoin(
-                iu,
-                and_(iu.geoid == Tract.geoid, iu.year == year_eff, iu.metric_name == "uninsured_pct"),
-            )
-            .outerjoin(
-                ia,
-                and_(ia.geoid == Tract.geoid, ia.year == year_eff, ia.metric_name == "asthma_pct"),
-            )
-            .outerjoin(
-                imh,
-                and_(imh.geoid == Tract.geoid, imh.year == year_eff, imh.metric_name == "mental_health_pct"),
-            )
-            .where(RiskScore.composite_score >= min_score)
-            .order_by(health_blend.desc().nulls_last(), RiskScore.composite_score.desc())
-        )
-    else:
-        stmt = (
-            select(Tract, RiskScore.composite_score)
-            .join(RiskScore, and_(RiskScore.geoid == Tract.geoid, RiskScore.year == year_eff))
-            .where(RiskScore.composite_score >= min_score)
-            .order_by(RiskScore.composite_score.desc())
-        )
-    if state:
-        stmt = stmt.where(Tract.state_fips == state.zfill(2))
-    if min_population > 0:
-        stmt = stmt.where(Tract.population >= min_population)
-    if exclude_institutional:
-        stmt = stmt.where(Tract.is_institutional.is_(False))
-    if urban_rural:
-        stmt = stmt.where(Tract.urban_rural == urban_rural)
-
-    allowed: set[str] | None = None
-    if min_rent_burden is not None:
-        q = select(Indicator.geoid).where(
-            Indicator.year == year_eff,
-            Indicator.metric_name == "rent_burden_pct",
-            Indicator.value >= min_rent_burden,
-        )
-        s = set((await session.execute(q)).scalars().all())
-        allowed = s if allowed is None else allowed & s
-    if min_uninsured is not None:
-        q = select(Indicator.geoid).where(
-            Indicator.year == year_eff,
-            Indicator.metric_name == "uninsured_pct",
-            Indicator.value >= min_uninsured,
-        )
-        s = set((await session.execute(q)).scalars().all())
-        allowed = s if allowed is None else allowed & s
-    if high_asthma:
-        q = select(Indicator.geoid).where(
-            Indicator.year == year_eff,
-            Indicator.metric_name == "asthma_pct",
-            Indicator.value >= 12.0,
-        )
-        s = set((await session.execute(q)).scalars().all())
-        allowed = s if allowed is None else allowed & s
-    if allowed is not None:
-        stmt = stmt.where(Tract.geoid.in_(allowed))
-
-    if max_clinic_distance_miles is not None:
-        tc1 = aliased(TractClinic)
-        stmt = stmt.join(
-            tc1,
-            and_(
-                tc1.geoid == Tract.geoid,
-                tc1.rank == 1,
-                tc1.distance_miles <= max_clinic_distance_miles,
-            ),
-        )
-    elif min_clinic_distance_miles is not None:
-        has_clinic_within = (
-            select(TractClinic.geoid)
-            .where(
-                TractClinic.rank == 1,
-                TractClinic.distance_miles <= min_clinic_distance_miles,
-            )
-            .distinct()
-        )
-        stmt = stmt.where(~Tract.geoid.in_(has_clinic_within))
+    filter_params = TractListFilterParams(
+        year_eff=year_eff,
+        state=state,
+        min_score=min_score,
+        min_population=min_population,
+        exclude_institutional=exclude_institutional,
+        max_clinic_distance_miles=max_clinic_distance_miles,
+        min_clinic_distance_miles=min_clinic_distance_miles,
+        min_rent_burden=min_rent_burden,
+        min_uninsured=min_uninsured,
+        high_asthma=high_asthma,
+        urban_rural=urban_rural,
+        sort_by=sort_by,
+    )
+    stmt = build_list_tracts_select(filter_params)
+    stmt = await apply_tract_list_filters(session, stmt, filter_params)
 
     id_subq = stmt.with_only_columns(Tract.geoid).order_by(None).subquery()
     total = (await session.execute(select(func.count()).select_from(id_subq))).scalar() or 0

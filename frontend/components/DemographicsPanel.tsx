@@ -2,6 +2,8 @@
 
 import { API_BASE } from "@/lib/api";
 import { useEffect, useLayoutEffect, useState } from "react";
+import { RACE_SEGMENTS } from "@/lib/demographics";
+import { CollapseChevron } from "@/components/CollapseChevron";
 
 type TractDemographicsPayload = {
   geoid: string;
@@ -28,29 +30,6 @@ function dashPct(v: number | null | undefined): string {
   return `${v.toFixed(1)}%`;
 }
 
-/** Race/ethnicity bar colors aligned with Census-style reference palette (ACS B03002 buckets). */
-const RACE_SEGMENTS: {
-  key: keyof Pick<
-    TractDemographicsPayload,
-    "pct_white" | "pct_black" | "pct_hispanic" | "pct_asian" | "pct_other_race"
-  >;
-  label: string;
-  /** Fill for bar + legend swatch */
-  barColor: string;
-  /** In-bar percentage label (reference uses dark text on these fills) */
-  labelClass: string;
-}[] = [
-  { key: "pct_white", label: "White", barColor: "#f2c49c", labelClass: "text-nh-brown" },
-  { key: "pct_black", label: "Black", barColor: "#6ec4f0", labelClass: "text-nh-brown" },
-  { key: "pct_hispanic", label: "Hispanic", barColor: "#8fb88f", labelClass: "text-nh-brown" },
-  { key: "pct_asian", label: "Asian", barColor: "#eb9a8e", labelClass: "text-nh-brown" },
-  {
-    key: "pct_other_race",
-    label: "Other",
-    barColor: "#42a8ad",
-    labelClass: "text-nh-brown",
-  },
-];
 
 function DemographicsSkeleton() {
   return (
@@ -129,21 +108,6 @@ function RaceEthnicityBar({ data }: { data: TractDemographicsPayload }) {
   );
 }
 
-function CollapseChevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      className={`h-5 w-5 shrink-0 text-nh-brown-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-      aria-hidden
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
-  );
-}
 
 export function DemographicsPanel({ geoid }: { geoid: string }) {
   const [state, setState] = useState<"loading" | "absent" | "ready">("loading");
@@ -211,7 +175,7 @@ export function DemographicsPanel({ geoid }: { geoid: string }) {
         title="Click to expand or collapse demographics"
       >
         <span>Demographics</span>
-        <CollapseChevron open={panelOpen} />
+        <CollapseChevron isOpen={panelOpen} />
       </summary>
       <div className="border-t border-nh-brown/10 px-6 pb-6 pt-4">
         <div className="grid gap-8 sm:grid-cols-2">

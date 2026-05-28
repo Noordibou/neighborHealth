@@ -7,18 +7,15 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { BrandWordmark } from "@/components/BrandMark";
 import { BivariateLegend } from "@/components/BivariateLegend";
 import { NeighborMap } from "@/components/NeighborMap";
+import { TopTractsPanel, type RankedTractRow } from "@/components/TopTractsPanel";
+import { TractDetailPanel } from "@/components/TractDetailPanel";
 import {
   API_BASE,
   getMapGeoJSON,
   getStates,
   getTract,
-  getTractList,
   postMapTractsByGeoids,
-  searchFromAddress,
-  searchSuggest,
-  searchTracts,
   type SearchResultRow,
-  type SearchSuggestItem,
   type TractDetail,
 } from "@/lib/api";
 import { addToCompareTray, readCompareTray, removeFromCompareTray, writeCompareTray } from "@/lib/compareTray";
@@ -28,20 +25,11 @@ import {
   parseExploreMapSession,
   serializeExploreMapSession,
 } from "@/lib/exploreMapSession";
-import { isExploreBrowsePlaceholderViewport } from "@/lib/exploreMapPlaceholder";
 import { applyLayerMode, augmentGeoJSONForYear, type MapLayerMode } from "@/lib/mapGeojson";
-
-/** Explore-only layer tab; map augmentation still uses `MapLayerMode` (overlap → composite for `nh_map_value`). */
-type ExploreLayerMode = MapLayerMode | "overlap";
-
-const STATE_ABBR: Record<string, string> = {
-  "42": "PA",
-  "06": "CA",
-  "48": "TX",
-  "36": "NY",
-  "12": "FL",
-  "17": "IL",
-};
+import { SCORE_THRESHOLDS } from "@/lib/constants";
+import { STATE_FIPS_TO_POSTAL } from "@/lib/geo";
+import { parseExploreUrl, useExploreUrlSync, type ExploreLayerMode } from "./useExploreUrlSync";
+import { useExploreSearch } from "./useExploreSearch";
 
 function mapFillLabel(mode: ExploreLayerMode): string {
   if (mode === "composite") return "Priority index — composite";
@@ -50,194 +38,18 @@ function mapFillLabel(mode: ExploreLayerMode): string {
   return "Overlap — housing stress × health burden";
 }
 
-const TOP_TRACT_LAYER_HEADING: Record<ExploreLayerMode, string> = {
-  composite: "Composite index",
-  housing: "Rent burden",
-  health: "Health blend",
-  overlap: "Composite index",
-};
-
-const TOP_TRACT_SORT_HINT: Record<ExploreLayerMode, string> = {
-  composite: "Sorted by composite housing–health score (highest first).",
-  housing: "Sorted by rent burden % (highest first).",
-  health: "Sorted by average of uninsured %, asthma %, and mental health % (highest first).",
-  overlap: "Sorted by composite housing–health score (highest first).",
-};
-
 const PRIORITY_THRESHOLDS: Record<ExploreLayerMode, number | null> = {
-  composite: 50,
-  housing: 50,
-  /** Same 0–100-style scale as composite/housing (mean of uninsured %, asthma %, mental health %). */
-  health: 50,
+  composite: SCORE_THRESHOLDS.mapFlag,
+  housing: SCORE_THRESHOLDS.mapFlagHousing,
+  health: SCORE_THRESHOLDS.mapFlagHealth,
   overlap: null,
 };
 
 function priorityFlagCopy(mode: ExploreLayerMode): string {
-  if (mode === "composite") return "flagged priority (score ≥ 50)";
-  if (mode === "housing") return "flagged priority (rent burden ≥ 50%)";
-  if (mode === "health") return "flagged priority (health blend ≥ 50)";
+  if (mode === "composite") return `flagged priority (score ≥ ${SCORE_THRESHOLDS.mapFlag})`;
+  if (mode === "housing") return `flagged priority (rent burden ≥ ${SCORE_THRESHOLDS.mapFlagHousing}%)`;
+  if (mode === "health") return `flagged priority (health blend ≥ ${SCORE_THRESHOLDS.mapFlagHealth})`;
   return "in high-overlap zone (class 3-3)";
-}
-
-const LAYER_SORT_API: Record<ExploreLayerMode, "composite" | "housing" | "health"> = {
-  composite: "composite",
-  housing: "housing",
-  health: "health",
-  overlap: "composite",
-};
-
-function paramsEqual(a: URLSearchParams, b: URLSearchParams): boolean {
-  const keys = new Set<string>();
-  a.forEach((_, k) => {
-    keys.add(k);
-  });
-  b.forEach((_, k) => {
-    keys.add(k);
-  });
-  for (const k of Array.from(keys)) {
-    if (a.get(k) !== b.get(k)) return false;
-  }
-  return true;
-}
-
-function parseExploreUrl(search: string): {
-  tract: string | null;
-  /** Two-digit FIPS from `?state=` when present. */
-  stateFromUrl: string | null;
-  layer: ExploreLayerMode | null;
-  minRent: number | null;
-  minUninsured: number | null;
-  scoreMin: number | undefined;
-  popMin: number | undefined;
-  exclInst: boolean | undefined;
-  clinicDist: "" | "1" | "2" | "5" | "over5";
-  viewport: { lat: number; lng: number; zoom: number } | null;
-} {
-  const p = new URLSearchParams(search);
-  const tractRaw = p.get("tract")?.trim();
-  const tract = tractRaw && /^\d{11}$/.test(tractRaw) ? tractRaw : null;
-  const stateRaw = p.get("state")?.trim();
-  const stateFromUrl =
-    stateRaw && /^\d{2}$/.test(stateRaw.padStart(2).slice(0, 2)) ? stateRaw.padStart(2).slice(0, 2) : null;
-  const lr = p.get("layer")?.toLowerCase();
-  const layer: ExploreLayerMode | null =
-    lr === "housing" || lr === "health" || lr === "composite" || lr === "overlap"
-      ? (lr as ExploreLayerMode)
-      : null;
-  const rentN = Number(p.get("f_rent"));
-  const minRent =
-    Number.isFinite(rentN) && rentN >= 0 && rentN <= 100 ? Math.round(rentN) : null;
-  const uniN = Number(p.get("f_uninsured"));
-  const minUninsured =
-    Number.isFinite(uniN) && uniN >= 0 && uniN <= 50 ? Math.round(uniN) : null;
-  let scoreMin: number | undefined;
-  if (p.has("score_min")) {
-    const sc = Number(p.get("score_min"));
-    if (Number.isFinite(sc) && sc >= 0 && sc <= 100) scoreMin = Math.round(sc);
-  }
-  const POP_MIN_OPTS = new Set([0, 500, 1000, 2500, 5000]);
-  let popMin: number | undefined;
-  if (p.has("pop_min")) {
-    const pn = Number(p.get("pop_min"));
-    if (Number.isFinite(pn) && POP_MIN_OPTS.has(Math.round(pn))) popMin = Math.round(pn);
-  }
-  let exclInst: boolean | undefined;
-  if (p.has("excl_inst")) {
-    const raw = p.get("excl_inst")?.toLowerCase() ?? "";
-    exclInst = raw === "1" || raw === "true";
-  }
-  let clinicDist: "" | "1" | "2" | "5" | "over5" = "";
-  if (p.has("clinic_dist")) {
-    const cr = p.get("clinic_dist")?.trim().toLowerCase() ?? "";
-    if (cr === "1" || cr === "2" || cr === "5") clinicDist = cr;
-    else if (cr === "over5") clinicDist = "over5";
-  }
-  const lat = Number(p.get("lat"));
-  const lng = Number(p.get("lng"));
-  const zoom = Number(p.get("zoom"));
-  const viewport =
-    Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
-    Number.isFinite(lng) && lng >= -180 && lng <= 180 &&
-    Number.isFinite(zoom) && zoom >= 0 && zoom <= 22
-      ? { lat, lng, zoom }
-      : null;
-  return {
-    tract,
-    stateFromUrl,
-    layer,
-    minRent,
-    minUninsured,
-    scoreMin,
-    popMin,
-    exclInst,
-    clinicDist,
-    viewport,
-  };
-}
-
-function buildExploreUrlParams(opts: {
-  qParam: string | null | undefined;
-  stateFips: string | null;
-  selectedGeoid: string | null;
-  layerMode: ExploreLayerMode;
-  appliedMinScore: number;
-  appliedMinPopulation: number;
-  appliedExcludeInstitutional: boolean;
-  appliedMinRent: number;
-  appliedMinUninsured: number;
-  appliedClinicDist: "" | "1" | "2" | "5" | "over5";
-  viewport: { lng: number; lat: number; zoom: number } | null;
-}): URLSearchParams {
-  const p = new URLSearchParams();
-  if (opts.qParam) p.set("q", opts.qParam);
-  if (opts.stateFips) p.set("state", opts.stateFips.padStart(2, "0").slice(0, 2));
-  if (opts.selectedGeoid) p.set("tract", opts.selectedGeoid);
-  if (opts.layerMode !== "composite") p.set("layer", opts.layerMode);
-  if (opts.appliedMinScore > 0) p.set("score_min", String(opts.appliedMinScore));
-  if (opts.appliedMinPopulation > 0) p.set("pop_min", String(opts.appliedMinPopulation));
-  if (opts.appliedExcludeInstitutional) p.set("excl_inst", "1");
-  if (opts.appliedClinicDist !== "") p.set("clinic_dist", opts.appliedClinicDist);
-  if (opts.appliedMinRent > 0) p.set("f_rent", String(opts.appliedMinRent));
-  if (opts.appliedMinUninsured > 0) p.set("f_uninsured", String(opts.appliedMinUninsured));
-  if (opts.viewport) {
-    p.set("lat", opts.viewport.lat.toFixed(4));
-    p.set("lng", opts.viewport.lng.toFixed(4));
-    p.set("zoom", opts.viewport.zoom.toFixed(1));
-  }
-  return p;
-}
-
-/** Sidebar indicator bars — matches tract detail `metric_name` keys */
-const SIDEBAR_METRICS: { metric_name: string; label: string }[] = [
-  { metric_name: "rent_burden_pct", label: "Rent burden" },
-  { metric_name: "overcrowding_pct", label: "Overcrowding" },
-  { metric_name: "asthma_pct", label: "Asthma prevalence" },
-  { metric_name: "uninsured_pct", label: "Uninsured" },
-  { metric_name: "mental_health_pct", label: "Mental health" },
-];
-
-function indicatorValue(indicators: TractDetail["indicators"], metric_name: string): number | null {
-  const row = indicators.find((i) => i.metric_name === metric_name);
-  return row?.value != null && Number.isFinite(row.value) ? row.value : null;
-}
-
-/** Warm ramp for bar fill from low (sand) to high (terracotta) */
-function barFillStyle(pct: number): { background: string } {
-  const t = Math.max(0, Math.min(1, pct / 100));
-  const lo = [232, 212, 196];
-  const hi = [179, 92, 58];
-  const r = Math.round(lo[0] + (hi[0] - lo[0]) * t);
-  const g = Math.round(lo[1] + (hi[1] - lo[1]) * t);
-  const b = Math.round(lo[2] + (hi[2] - lo[2]) * t);
-  return { background: `rgb(${r},${g},${b})` };
-}
-
-/** Prefer Census address geocoder when the query looks like a street address (not a bare GEOID). */
-function looksLikeUsStreetAddress(s: string): boolean {
-  const t = s.trim();
-  if (t.length < 8 || t.length > 400) return false;
-  if (/^\d{11}$/.test(t)) return false;
-  return /^\d+\s/.test(t);
 }
 
 type MapMode = "browse" | "search";
@@ -250,41 +62,29 @@ function ExploreInner() {
   const [stateFips, setStateFips] = useState<string | null>(null);
   const [geojson, setGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [q, setQ] = useState(initialQ);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResultRow[] | null>(null);
-  const [searchNarrowFips, setSearchNarrowFips] = useState<string | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>("browse");
   const [searchGeojson, setSearchGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
   const [searchMapLoading, setSearchMapLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<SearchSuggestItem[]>([]);
-  const [suggestOpen, setSuggestOpen] = useState(false);
   const [searchZoomKey, setSearchZoomKey] = useState(0);
   /** When false, skip persisting so hydrate does not overwrite sessionStorage with default state. */
   const [sessionReady, setSessionReady] = useState(false);
-  const [ranked, setRanked] = useState<
-    {
-      geoid: string;
-      composite_score: number | null;
-      layer_value: number | null;
-      name: string | null;
-      county_name: string | null;
-    }[]
-  >([]);
-  const [rankedTotal, setRankedTotal] = useState(0);
+  const [rankedForTray, setRankedForTray] = useState<RankedTractRow[]>([]);
   const [layerMode, setLayerMode] = useState<ExploreLayerMode>("composite");
   const [compareTray, setCompareTray] = useState<string[]>([]);
   const [selectedGeoid, setSelectedGeoid] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<TractDetail | null>(null);
   const [selectedDetailErr, setSelectedDetailErr] = useState<string | null>(null);
   const [shareHint, setShareHint] = useState<string | null>(null);
-  const [searchResultsExpanded, setSearchResultsExpanded] = useState(true);
-  const [rankingFiltersOpen, setRankingFiltersOpen] = useState(false);
-  const [availableStates, setAvailableStates] = useState<{ state_fips: string; state_name: string }[]>([]);
+  const [availableStates, setAvailableStates] = useState<
+    { state_fips: string; state_name: string; tract_count: number }[]
+  >([]);
   const [usStatesGeojson, setUsStatesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
 
   const [draft, setDraft] = useState({
+    minScore: 0,
     minRent: 0,
     minUninsured: 0,
     asthma: 0,
@@ -302,18 +102,73 @@ function ExploreInner() {
   });
 
   const exploreMapRef = useRef<MapRef | null>(null);
-  const suppressViewportUrlUntilRef = useRef(0);
-  const viewportDebounceRef = useRef<number | null>(null);
-  const pendingViewportRef = useRef<{ lng: number; lat: number; zoom: number } | null>(null);
-
-  const [viewportForUrl, setViewportForUrl] = useState<{ lng: number; lat: number; zoom: number } | null>(
-    null
-  );
-  const [pendingUrlFly, setPendingUrlFly] = useState<{ lat: number; lng: number; zoom: number } | null>(
-    null
-  );
 
   const skipSessionHydrate = initialQ.length > 0;
+
+  // clearSearchState clears only search UI state (no viewport — that's owned by useExploreUrlSync).
+  const clearSearchState = useCallback(() => {
+    setMapMode("browse");
+    setSearchGeojson(null);
+    setSearchResults(null);
+    setSearchError(null);
+    setSearchInfo(null);
+  }, []);
+
+  const { onExploreMapMoveEnd, clearViewport, suppressViewportUrl } = useExploreUrlSync({
+    sessionReady,
+    stateFips,
+    selectedGeoid,
+    layerMode,
+    applied,
+    mapMode,
+    exploreMapRef,
+    setStateFips,
+    setSelectedGeoid,
+    setLayerMode,
+    setDraft,
+    setApplied,
+    clearSearchState,
+  });
+
+  const clearSearchMap = useCallback(() => {
+    clearSearchState();
+    clearViewport();
+  }, [clearSearchState, clearViewport]);
+
+  const {
+    q,
+    setQ,
+    searchNarrowFips,
+    setSearchNarrowFips,
+    suggestions,
+    suggestOpen,
+    setSuggestOpen,
+    searchResultsExpanded,
+    setSearchResultsExpanded,
+    clearSearch: clearSearchFields,
+    onSearchSubmit,
+    onPickSuggestion,
+  } = useExploreSearch({
+    initialQ,
+    stateFips,
+    clearViewport,
+    onSelectState: (fips) => {
+      clearSearchMap();
+      setStateFips(fips.padStart(2, "0").slice(0, 2));
+    },
+    setMapMode,
+    setSearchGeojson,
+    setSearchResults,
+    setSearchError,
+    setSearchInfo,
+    setSearchMapLoading,
+    setSearchZoomKey,
+  });
+
+  const clearSearch = useCallback(() => {
+    clearSearchFields();
+    clearSearchMap();
+  }, [clearSearchFields, clearSearchMap]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -325,8 +180,8 @@ function ExploreInner() {
     const raw = sessionStorage.getItem(EXPLORE_MAP_SESSION_KEY);
     const data = parseExploreMapSession(raw);
     if (!data) {
-      const urlSt = new URLSearchParams(window.location.search).get("state");
-      if (urlSt && /^\d{2}$/.test(urlSt)) setStateFips(urlSt);
+      const { stateFromUrl } = parseExploreUrl(window.location.search);
+      if (stateFromUrl) setStateFips(stateFromUrl);
       setSessionReady(true);
       return;
     }
@@ -344,8 +199,7 @@ function ExploreInner() {
           if (cancelled) return;
           if (fc.features?.length) {
             setSearchGeojson(fc);
-            setViewportForUrl(null);
-            setPendingUrlFly(null);
+            clearViewport();
             setSearchZoomKey((k) => k + 1);
           } else {
             setMapMode("browse");
@@ -372,7 +226,7 @@ function ExploreInner() {
     return () => {
       cancelled = true;
     };
-  }, [skipSessionHydrate, initialQ]);
+  }, [skipSessionHydrate, initialQ, clearViewport]);
 
   useEffect(() => {
     setCompareTray(readCompareTray());
@@ -384,7 +238,11 @@ function ExploreInner() {
       .then((rows) => {
         if (!cancelled) {
           setAvailableStates(
-            rows.map((r) => ({ state_fips: r.state_fips.padStart(2, "0"), state_name: r.state_name }))
+            rows.map((r) => ({
+              state_fips: r.state_fips.padStart(2, "0"),
+              state_name: r.state_name,
+              tract_count: r.tract_count,
+            }))
           );
         }
       })
@@ -423,43 +281,6 @@ function ExploreInner() {
     }
   }, [sessionReady, sp]);
 
-  useEffect(() => {
-    if (!sessionReady || typeof window === "undefined") return;
-    const qParam = sp.get("q");
-    const merged = buildExploreUrlParams({
-      qParam,
-      stateFips,
-      selectedGeoid,
-      layerMode,
-      appliedMinScore: applied.minScore,
-      appliedMinPopulation: applied.minPopulation,
-      appliedExcludeInstitutional: applied.excludeInstitutional,
-      appliedMinRent: applied.minRent,
-      appliedMinUninsured: applied.minUninsured,
-      appliedClinicDist: applied.clinicDist,
-      viewport: stateFips ? viewportForUrl : null,
-    });
-    const current = new URLSearchParams(window.location.search);
-    if (paramsEqual(merged, current)) return;
-    const qs = merged.toString();
-    const nextPath = qs ? `/explore?${qs}` : "/explore";
-    window.history.replaceState(window.history.state ?? null, "", nextPath);
-    router.replace(nextPath, { scroll: false });
-  }, [
-    sessionReady,
-    router,
-    sp,
-    stateFips,
-    selectedGeoid,
-    layerMode,
-    applied.minScore,
-    applied.minPopulation,
-    applied.excludeInstitutional,
-    applied.minRent,
-    applied.minUninsured,
-    applied.clinicDist,
-    viewportForUrl,
-  ]);
 
   useEffect(() => {
     if (!selectedGeoid) {
@@ -530,354 +351,6 @@ function ExploreInner() {
       .catch((e: Error) => setErr(e.message));
   }, [stateFips]);
 
-  /** Home page sends ?q= — run one search and go to the tract (no map fetch on explore). */
-  useEffect(() => {
-    if (!initialQ) return;
-    const key = `nh-explore-q-${initialQ}`;
-    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(key)) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await searchTracts(initialQ);
-        if (cancelled || !r.results[0]) return;
-        if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, "1");
-        router.replace(`/tract/${r.results[0].geoid}`);
-      } catch {
-        /* stay on explore; user can search again */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [initialQ, router]);
-
-  const clearSearchMap = useCallback(() => {
-    setMapMode("browse");
-    setSearchGeojson(null);
-    setSearchResults(null);
-    setSearchError(null);
-    setSearchInfo(null);
-    setViewportForUrl(null);
-    setPendingUrlFly(null);
-  }, []);
-
-  useEffect(() => {
-    if (!sessionReady || typeof window === "undefined") return;
-    const parsed = parseExploreUrl(window.location.search);
-    if (parsed.tract) {
-      clearSearchMap();
-      const sf = parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2);
-      setStateFips(sf);
-      setSelectedGeoid(parsed.tract);
-    }
-    if (parsed.layer !== null) setLayerMode(parsed.layer);
-    if (parsed.minRent !== null) {
-      const v = parsed.minRent;
-      setDraft((d) => ({ ...d, minRent: v }));
-      setApplied((a) => ({ ...a, minRent: v }));
-    }
-    if (parsed.minUninsured !== null) {
-      const v = parsed.minUninsured;
-      setDraft((d) => ({ ...d, minUninsured: v }));
-      setApplied((a) => ({ ...a, minUninsured: v }));
-    }
-    if (parsed.scoreMin !== undefined) {
-      setApplied((a) => ({ ...a, minScore: parsed.scoreMin! }));
-    }
-    if (parsed.popMin !== undefined) {
-      setApplied((a) => ({ ...a, minPopulation: parsed.popMin! }));
-    }
-    if (parsed.exclInst !== undefined) {
-      setApplied((a) => ({ ...a, excludeInstitutional: parsed.exclInst! }));
-    }
-    if (parsed.clinicDist) {
-      setApplied((a) => ({ ...a, clinicDist: parsed.clinicDist }));
-    }
-    if (parsed.viewport) {
-      const fromTract = parsed.tract ? parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2) : null;
-      const sfForViewport = fromTract ?? parsed.stateFromUrl ?? stateFips;
-      if (
-        sfForViewport &&
-        !isExploreBrowsePlaceholderViewport(sfForViewport, parsed.viewport)
-      ) {
-        setViewportForUrl({
-          lng: parsed.viewport.lng,
-          lat: parsed.viewport.lat,
-          zoom: parsed.viewport.zoom,
-        });
-        setPendingUrlFly(parsed.viewport);
-      }
-    }
-  }, [sessionReady, clearSearchMap]);
-
-  useEffect(() => {
-    if (!pendingUrlFly || !sessionReady) return;
-    const target = pendingUrlFly;
-    let cancelled = false;
-    let attempts = 0;
-    const id = window.setInterval(() => {
-      if (cancelled) return;
-      attempts += 1;
-      const map = exploreMapRef.current?.getMap?.();
-      if (!map) {
-        if (attempts > 200) {
-          window.clearInterval(id);
-          setPendingUrlFly(null);
-        }
-        return;
-      }
-      const loaded = typeof map.isStyleLoaded === "function" ? map.isStyleLoaded() : true;
-      if (!loaded && attempts < 200) return;
-      window.clearInterval(id);
-      setPendingUrlFly(null);
-      suppressViewportUrlUntilRef.current = Date.now() + 1600;
-      try {
-        map.jumpTo({ center: [target.lng, target.lat], zoom: target.zoom });
-      } catch {
-        /* ignore */
-      }
-    }, 50);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [pendingUrlFly, sessionReady]);
-
-  useEffect(
-    () => () => {
-      if (viewportDebounceRef.current != null) window.clearTimeout(viewportDebounceRef.current);
-    },
-    []
-  );
-
-  const onExploreMapMoveEnd = useCallback(
-    (v: { lng: number; lat: number; zoom: number }) => {
-      if (typeof window !== "undefined" && Date.now() < suppressViewportUrlUntilRef.current) return;
-      if (mapMode === "browse" && !stateFips) return;
-      pendingViewportRef.current = v;
-      if (viewportDebounceRef.current != null) window.clearTimeout(viewportDebounceRef.current);
-      viewportDebounceRef.current = window.setTimeout(() => {
-        viewportDebounceRef.current = null;
-        const p = pendingViewportRef.current;
-        if (!p) return;
-        setViewportForUrl({
-          lng: Math.round(p.lng * 10000) / 10000,
-          lat: Math.round(p.lat * 10000) / 10000,
-          zoom: Math.round(p.zoom * 10) / 10,
-        });
-      }, 500);
-    },
-    [mapMode, stateFips]
-  );
-
-  const clearSearch = useCallback(() => {
-    setQ("");
-    setSearchNarrowFips(null);
-    setSuggestions([]);
-    setSuggestOpen(false);
-    clearSearchMap();
-  }, [clearSearchMap]);
-
-  const runSearchOnMap = useCallback(async (query: string, narrow?: string | null) => {
-    const t = query.trim();
-    if (!t) return;
-    setSearchError(null);
-    setSearchInfo(null);
-    setSearchMapLoading(true);
-    try {
-      const tryAddress = looksLikeUsStreetAddress(t);
-      if (tryAddress) {
-        try {
-          const ar = await searchFromAddress(t, narrow ?? undefined);
-          if (ar.results.length > 0) {
-            setSearchResults(ar.results);
-            const bits: string[] = [];
-            if (ar.matched_address) bits.push(ar.matched_address);
-            if (ar.resolver === "postgis_point") {
-              bits.push("Located using stored tract boundaries (point-in-polygon).");
-            }
-            if (ar.message) bits.push(ar.message);
-            setSearchInfo(bits.length ? bits.join(" · ") : null);
-            const fc = await postMapTractsByGeoids(ar.results.map((x) => x.geoid));
-            if (!fc.features?.length) {
-              setSearchInfo(null);
-              setSearchError("Address resolved, but map geometry is missing for that tract.");
-              setSearchGeojson(null);
-              setMapMode("browse");
-              return;
-            }
-            setSearchGeojson(fc);
-            setMapMode("search");
-            setViewportForUrl(null);
-            setPendingUrlFly(null);
-            setSearchZoomKey((k) => k + 1);
-            setSuggestOpen(false);
-            return;
-          }
-          if (ar.census_tract_geoid != null || ar.message != null) {
-            setSearchResults(null);
-            setSearchGeojson(null);
-            setMapMode("browse");
-            setSearchError(
-              ar.message ??
-                (ar.census_tract_geoid
-                  ? `Census reports tract ${ar.census_tract_geoid}, but this app has no data for it yet.`
-                  : "Address lookup did not return a tract in this app.")
-            );
-            return;
-          }
-        } catch {
-          /* Census geocoder or API error — fall through to text search */
-        }
-      }
-
-      const r = await searchTracts(t, { stateFips: narrow ?? undefined, limit: 75 });
-      if (!r.results.length) {
-        setSearchError(
-          "No matches. Try a street address (e.g. 123 Main St, Houston TX), place, county, state, or GEOID — or pick a suggestion."
-        );
-        setSearchResults(null);
-        setSearchGeojson(null);
-        setMapMode("browse");
-        return;
-      }
-      setSearchResults(r.results);
-      const fc = await postMapTractsByGeoids(r.results.map((x) => x.geoid));
-      if (!fc.features?.length) {
-        setSearchError("Matches found, but none have map geometry yet. Try ingesting boundaries for this area.");
-        setSearchGeojson(null);
-        setMapMode("browse");
-        return;
-      }
-      setSearchGeojson(fc);
-      setMapMode("search");
-      setViewportForUrl(null);
-      setPendingUrlFly(null);
-      setSearchZoomKey((k) => k + 1);
-      setSuggestOpen(false);
-    } catch (err: unknown) {
-      setSearchError(err instanceof Error ? err.message : "Search failed.");
-      setSearchGeojson(null);
-      setMapMode("browse");
-    } finally {
-      setSearchMapLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const t = q.trim();
-    if (t.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    const id = setTimeout(() => {
-      searchSuggest(t)
-        .then((res) => setSuggestions(res.items))
-        .catch(() => setSuggestions([]));
-    }, 260);
-    return () => clearTimeout(id);
-  }, [q]);
-
-  const fetchList = useCallback(() => {
-    if (!stateFips) {
-      setRanked([]);
-      setRankedTotal(0);
-      return;
-    }
-    const params: Record<string, string | undefined> = {
-      state: stateFips,
-      limit: "50",
-      sort_by: LAYER_SORT_API[layerMode],
-    };
-    if (applied.minScore > 0) params.min_score = String(Math.round(applied.minScore));
-    if (applied.minPopulation > 0) params.min_population = String(applied.minPopulation);
-    if (applied.excludeInstitutional) params.exclude_institutional = "true";
-    if (applied.clinicDist === "1") params.max_clinic_distance_miles = "1";
-    else if (applied.clinicDist === "2") params.max_clinic_distance_miles = "2";
-    else if (applied.clinicDist === "5") params.max_clinic_distance_miles = "5";
-    else if (applied.clinicDist === "over5") params.min_clinic_distance_miles = "5";
-    if (applied.minRent > 0) params.min_rent_burden = String(applied.minRent);
-    if (applied.minUninsured > 0) params.min_uninsured = String(applied.minUninsured);
-    if (applied.asthmaHigh) params.high_asthma = "true";
-    if (applied.urbanRural) params.urban_rural = applied.urbanRural;
-
-    getTractList(params)
-      .then((r) => {
-        setRankedTotal(r.total);
-        setRanked(
-          r.items.map((i) => ({
-            geoid: i.geoid,
-            composite_score: i.composite_score,
-            layer_value: i.layer_value ?? null,
-            name: i.name,
-            county_name: i.county_name,
-          }))
-        );
-      })
-      .catch(() => {
-        setRanked([]);
-        setRankedTotal(0);
-      });
-  }, [stateFips, applied, layerMode]);
-
-  useEffect(() => {
-    fetchList();
-  }, [fetchList]);
-
-  useEffect(() => {
-    if (!stateFips) setRankingFiltersOpen(false);
-  }, [stateFips]);
-
-  async function onSearchSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!q.trim()) return;
-    await runSearchOnMap(q.trim(), searchNarrowFips);
-  }
-
-  function onPickSuggestion(item: SearchSuggestItem) {
-    setSuggestOpen(false);
-    if (item.kind === "state" && item.state_fips) {
-      clearSearchMap();
-      setStateFips(item.state_fips);
-      setQ(item.query);
-      setSearchNarrowFips(null);
-      return;
-    }
-    setQ(item.query);
-    setSearchNarrowFips(item.state_fips ?? null);
-    void runSearchOnMap(item.query, item.state_fips ?? null);
-  }
-
-  function applyFilters() {
-    setApplied((a) => ({
-      ...a,
-      minRent: draft.minRent,
-      minUninsured: draft.minUninsured,
-      asthmaHigh: draft.asthma >= 12,
-      urbanRural: draft.urbanRural,
-    }));
-  }
-
-  function resetRankingFilters() {
-    setDraft({
-      minRent: 0,
-      minUninsured: 0,
-      asthma: 0,
-      urbanRural: "",
-    });
-    setApplied((a) => ({
-      ...a,
-      minScore: 0,
-      minPopulation: 0,
-      excludeInstitutional: false,
-      minRent: 0,
-      minUninsured: 0,
-      asthmaHigh: false,
-      urbanRural: "",
-      clinicDist: "",
-    }));
-  }
-
   const onSelectTract = useCallback((geoid: string) => {
     setSelectedGeoid(geoid);
   }, []);
@@ -886,13 +359,11 @@ function ExploreInner() {
     (fips: string) => {
       const sf = fips.padStart(2, "0").slice(0, 2);
       clearSearchMap();
-      setViewportForUrl(null);
-      setPendingUrlFly(null);
-      suppressViewportUrlUntilRef.current = Date.now() + 2200;
+      suppressViewportUrl(2200);
       setStateFips(sf);
       setSelectedGeoid(null);
     },
-    [clearSearchMap]
+    [clearSearchMap, suppressViewportUrl]
   );
 
   const goToUsOverview = useCallback(() => {
@@ -900,9 +371,8 @@ function ExploreInner() {
     setGeojson(null);
     setErr(null);
     setSelectedGeoid(null);
-    setViewportForUrl(null);
-    setPendingUrlFly(null);
-  }, []);
+    clearViewport();
+  }, [clearViewport]);
 
   const statePickerGeoJSON = useMemo(() => {
     if (!usStatesGeojson?.features?.length) return null;
@@ -980,7 +450,12 @@ function ExploreInner() {
       availableStates.find((s) => s.state_fips.padStart(2, "0").slice(0, 2) === sf)?.state_name ?? `FIPS ${sf}`
     );
   }, [stateFips, availableStates]);
-  const stateAbbr = stateFips ? STATE_ABBR[stateFips] ?? stateFips : "";
+  const stateAbbr = stateFips ? STATE_FIPS_TO_POSTAL[stateFips] ?? stateFips : "";
+
+  const exploreDataStatus = useMemo(() => {
+    const total = availableStates.reduce((sum, st) => sum + st.tract_count, 0);
+    return { total, stateCount: availableStates.length };
+  }, [availableStates]);
 
   const featureCount = geojson?.features?.length ?? 0;
   const noData = !err && geojson != null && featureCount === 0;
@@ -1147,7 +622,8 @@ function ExploreInner() {
               </form>
               {searchNarrowFips ? (
                 <p className="mt-2 text-[11px] text-nh-brown-muted">
-                  Narrowed to state FIPS <span className="font-mono">{searchNarrowFips}</span>
+                  Narrowed to{" "}
+                  {availableStates.find((s) => s.state_fips === searchNarrowFips)?.state_name ?? searchNarrowFips}
                 </p>
               ) : null}
               {searchError ? <p className="mt-2 text-xs text-red-600">{searchError}</p> : null}
@@ -1214,7 +690,7 @@ function ExploreInner() {
                     </ul>
                   ) : (
                     <div className="mt-3 rounded-lg border border-dashed border-nh-brown/20 bg-nh-cream/40 px-3 py-3 text-xs text-nh-brown-muted">
-                      Try a tract GEOID, place, county, or street address in Search above.
+                      Try a Census tract ID, place, county, or street address in Search above.
                     </div>
                   )}
                 </>
@@ -1224,6 +700,12 @@ function ExploreInner() {
         </aside>
 
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col px-2 pt-2 lg:min-h-0 lg:px-4">
+          {exploreDataStatus.stateCount > 0 ? (
+            <p className="mb-1.5 text-[10px] leading-snug text-nh-brown-muted">
+              Data: ACS 2022 · {exploreDataStatus.total.toLocaleString()} tracts across{" "}
+              {exploreDataStatus.stateCount} states
+            </p>
+          ) : null}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted">
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-nh-brown-muted">
@@ -1382,7 +864,20 @@ function ExploreInner() {
         <aside className="flex max-h-[min(40vh,360px)] min-h-0 shrink-0 flex-col overflow-hidden border-t border-[#e8e3dc] bg-[#faf8f5] xl:h-full xl:max-h-none xl:w-[380px] xl:border-l xl:border-t-0">
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
             <div>
-              {!selectedGeoid && (
+              {!selectedGeoid && !stateFips && (
+                <div className="rounded-xl border border-nh-brown/10 bg-nh-cream/50 p-4">
+                  <h3 className="font-display text-base font-semibold text-nh-brown">
+                    Find high-burden communities
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
+                    Select a state on the map to view tract rankings by housing stress and health burden.
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
+                    Or search for a neighborhood, address, or Census tract ID using the search bar.
+                  </p>
+                </div>
+              )}
+              {!selectedGeoid && stateFips && (
                 <p className="text-sm leading-relaxed text-[#6b6560]">
                   Click a tract on the map to inspect scores and add to compare.
                 </p>
@@ -1390,345 +885,31 @@ function ExploreInner() {
               {selectedGeoid && selectedDetailErr && (
                 <p className="mt-2 text-sm text-red-600">{selectedDetailErr}</p>
               )}
-              {selectedDetail && (
-                <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] p-4 shadow-sm">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8e8e8e]">Selected tract</p>
-                  <div className="mt-3 flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-display text-xl font-bold leading-tight text-[#2d2d2d]">
-                        {selectedDetail.name ?? `Tract ${selectedDetail.geoid}`}
-                      </h3>
-                      <p className="mt-1 text-sm text-[#6b6560]">
-                        <span className="font-mono text-[13px]">{selectedDetail.geoid}</span>
-                        <span className="text-[#c4bcb4]"> · </span>
-                        {selectedDetail.place_name ?? selectedDetail.county_name ?? "—"}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">Index</p>
-                      <p className="font-display text-[2.75rem] font-bold leading-none text-[#c4a574]">
-                        {selectedDetail.risk_score?.composite_score != null
-                          ? Math.round(selectedDetail.risk_score.composite_score)
-                          : "—"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    <Link
-                      href={`/tract/${selectedDetail.geoid}`}
-                      className="flex min-w-0 flex-1 basis-[calc(50%-0.25rem)] items-center justify-center rounded-full bg-[#b34d3a] px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-[#9a4131]"
-                    >
-                      View profile →
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setCompareTray(addToCompareTray(selectedDetail.geoid))}
-                      disabled={compareTray.includes(selectedDetail.geoid) || compareTray.length >= 4}
-                      className={`flex min-w-0 flex-1 basis-[calc(50%-0.25rem)] items-center justify-center rounded-full border-2 px-4 py-2.5 text-sm font-semibold shadow-sm transition disabled:opacity-40 ${
-                        compareTray.includes(selectedDetail.geoid)
-                          ? "border-[#b34d3a] bg-white text-[#b34d3a]"
-                          : "border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/40"
-                      }`}
-                    >
-                      {compareTray.includes(selectedDetail.geoid) ? "✓ In compare" : "+ Compare"}
-                    </button>
-                  </div>
-
-                  <div className="mt-6 space-y-4">
-                    {SIDEBAR_METRICS.map(({ metric_name, label }) => {
-                      const v = indicatorValue(selectedDetail.indicators, metric_name);
-                      const pct = v != null ? Math.min(100, Math.max(0, v)) : null;
-                      const indRow = selectedDetail.indicators.find((i) => i.metric_name === metric_name);
-                      const pCounty = indRow?.percentile_county;
-                      const pState = indRow?.percentile_state;
-                      const useCounty = pCounty != null && Number.isFinite(pCounty);
-                      const markerPos = useCounty
-                        ? Math.min(100, Math.max(0, pCounty))
-                        : pState != null && Number.isFinite(pState)
-                          ? Math.min(100, Math.max(0, pState))
-                          : 50;
-                      const markerTitle = useCounty
-                        ? "County median (percentile rank among tracts in this county)"
-                        : pState != null && Number.isFinite(pState)
-                          ? "State median (percentile rank among tracts in this state)"
-                          : "Peer median position unavailable";
-                      return (
-                        <div key={metric_name}>
-                          <div className="flex justify-between text-xs text-[#2d2d2d]">
-                            <span>{label}</span>
-                            <span className="tabular-nums font-semibold">
-                              {v != null
-                                ? `${metric_name === "uninsured_pct" ? v.toFixed(1) : Math.round(v)}%`
-                                : "—"}
-                            </span>
-                          </div>
-                          <div className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-[#ebe6df]">
-                            {pct != null ? (
-                              <div
-                                className="absolute left-0 top-0 h-full rounded-full"
-                                style={{ width: `${pct}%`, ...barFillStyle(pct) }}
-                              />
-                            ) : null}
-                            <div
-                              className="pointer-events-none absolute top-0 z-[1] h-full w-px -translate-x-1/2 border-l border-dashed border-[#9ca3af]"
-                              style={{ left: `${markerPos}%` }}
-                              title={markerTitle}
-                              aria-hidden
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-5 border-t border-[#e8e3dc] pt-3 text-[10px] leading-snug text-[#8e8e8e]">
-                    <span className="inline-block translate-y-px border-l border-dashed border-[#9ca3af] pl-1">
-                      Dashed line = county median percentile vs peers in the same county when enough tracts;
-                      otherwise state median percentile.
-                    </span>
-                  </p>
-                </div>
-              )}
+              <TractDetailPanel
+                tract={selectedDetail}
+                isInCompare={selectedDetail != null && compareTray.includes(selectedDetail.geoid)}
+                compareDisabled={compareTray.length >= 4}
+                onAddToCompare={() => {
+                  if (selectedDetail) setCompareTray(addToCompareTray(selectedDetail.geoid));
+                }}
+              />
             </div>
 
-            <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] shadow-sm">
-              <div className="border-b border-[#ebe6df] px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5c4a42]">
-                    Top tracts — {TOP_TRACT_LAYER_HEADING[layerMode]}
-                  </h2>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    <span className="text-[11px] tabular-nums text-[#8e8e8e]">
-                      {ranked.length} / {rankedTotal || "—"}
-                    </span>
-                    {stateFips ? (
-                      <button
-                        type="button"
-                        onClick={() => setRankingFiltersOpen((v) => !v)}
-                        aria-expanded={rankingFiltersOpen}
-                        aria-controls="ranking-filters-panel"
-                        aria-label={rankingFiltersOpen ? "Hide ranking filters" : "Show ranking filters"}
-                        className={`rounded-lg p-1.5 text-[#8e8e8e] transition hover:bg-[#ebe6df] hover:text-[#5c534c] ${rankingFiltersOpen ? "bg-[#ebe6df] text-[#5c534c]" : ""}`}
-                      >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
-                          />
-                        </svg>
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <p className="mt-1.5 text-[10px] leading-relaxed text-[#8e8e8e]">{TOP_TRACT_SORT_HINT[layerMode]}</p>
-              </div>
-
-              {stateFips && rankingFiltersOpen ? (
-                <div
-                  id="ranking-filters-panel"
-                  className="space-y-3 border-b border-[#ebe6df] bg-[#faf8f5] px-4 py-3"
-                >
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">
-                    Refine ranking list
-                  </p>
-                  <div>
-                    <div className="flex justify-between gap-2 text-[11px] font-medium text-[#5c534c]">
-                      <span className="shrink-0">Min. composite score</span>
-                      <span className="tabular-nums">Score ≥ {applied.minScore}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={applied.minScore}
-                      onChange={(e) =>
-                        setApplied((a) => ({ ...a, minScore: Math.round(Number(e.target.value)) }))
-                      }
-                      className="mt-1 w-full accent-[#b34d3a]"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="nh-pop-min" className="block text-[11px] font-medium text-[#5c534c]">
-                      Min. population
-                    </label>
-                    <select
-                      id="nh-pop-min"
-                      value={applied.minPopulation}
-                      onChange={(e) =>
-                        setApplied((a) => ({ ...a, minPopulation: Number(e.target.value) }))
-                      }
-                      className="mt-1 w-full rounded-xl border border-[#ebe6df] bg-white py-2 pl-3 pr-8 text-sm text-[#2d2d2d] focus:border-[#b34d3a] focus:outline-none focus:ring-1 focus:ring-[#b34d3a]"
-                    >
-                      <option value={0}>Any</option>
-                      <option value={500}>500+</option>
-                      <option value={1000}>1,000+</option>
-                      <option value={2500}>2,500+</option>
-                      <option value={5000}>5,000+</option>
-                    </select>
-                  </div>
-                  <label className="flex cursor-pointer items-start gap-2.5 text-[11px] font-medium text-[#5c534c]">
-                    <input
-                      type="checkbox"
-                      checked={applied.excludeInstitutional}
-                      onChange={(e) =>
-                        setApplied((a) => ({ ...a, excludeInstitutional: e.target.checked }))
-                      }
-                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#d6cfc7] text-[#b34d3a] accent-[#b34d3a]"
-                    />
-                    <span>Exclude institutional tracts</span>
-                  </label>
-                  <div>
-                    <label htmlFor="nh-fqhc-access" className="block text-[11px] font-medium text-[#5c534c]">
-                      FQHC access
-                    </label>
-                    <select
-                      id="nh-fqhc-access"
-                      value={applied.clinicDist}
-                      onChange={(e) =>
-                        setApplied((a) => ({
-                          ...a,
-                          clinicDist: e.target.value as "" | "1" | "2" | "5" | "over5",
-                        }))
-                      }
-                      className="mt-1 w-full rounded-xl border border-[#ebe6df] bg-white py-2 pl-3 pr-8 text-sm text-[#2d2d2d] focus:border-[#b34d3a] focus:outline-none focus:ring-1 focus:ring-[#b34d3a]"
-                    >
-                      <option value="">Any</option>
-                      <option value="1">Within 1 mile</option>
-                      <option value="2">Within 2 miles</option>
-                      <option value="5">Within 5 miles</option>
-                      <option value="over5">Over 5 miles</option>
-                    </select>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
-                      <span>Rent burden ≥</span>
-                      <span>{draft.minRent}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={draft.minRent}
-                      onChange={(e) => setDraft((d) => ({ ...d, minRent: Number(e.target.value) }))}
-                      className="mt-1 w-full accent-[#b34d3a]"
-                    />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
-                      <span>Uninsured ≥</span>
-                      <span>{draft.minUninsured}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={50}
-                      value={draft.minUninsured}
-                      onChange={(e) => setDraft((d) => ({ ...d, minUninsured: Number(e.target.value) }))}
-                      className="mt-1 w-full accent-[#b34d3a]"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        applyFilters();
-                        setRankingFiltersOpen(false);
-                      }}
-                      className="w-full rounded-xl bg-[#2d2d2d] py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1f1f1f]"
-                    >
-                      Apply filters
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        resetRankingFilters();
-                        setRankingFiltersOpen(false);
-                      }}
-                      className="w-full rounded-xl border border-[#d6cfc7] bg-white py-2 text-sm font-semibold text-[#5c534c] shadow-sm hover:bg-[#faf8f5]"
-                    >
-                      Reset filters
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="space-y-0 px-3 pb-3 pt-2">
-                <p className="px-1 text-[11px] text-[#8e8e8e]">{stateLabel}</p>
-                {!stateFips && (
-                  <p className="mt-2 px-1 text-xs leading-relaxed text-[#6b6560]">
-                    Click a state on the map (highlighted) to load tract rankings.
-                  </p>
-                )}
-                {noData && (
-                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-950">
-                    No tract rows in the database for this state yet.
-                  </p>
-                )}
-              </div>
-
-              <ul className="max-h-[min(52vh,28rem)] divide-y divide-[#ebe6df] overflow-y-auto overscroll-contain">
-                {ranked.slice(0, 16).map((r, idx) => {
-                  const label = r.name ?? `Tract ${r.geoid}`;
-                  const inTray = compareTray.includes(r.geoid);
-                  const isSel = selectedGeoid === r.geoid;
-                  const rankMetric = r.layer_value ?? r.composite_score;
-                  const score = rankMetric != null ? Math.round(rankMetric) : null;
-                  const scoreDisplay =
-                    score != null
-                      ? `${score}${layerMode === "composite" || layerMode === "overlap" ? "" : "%"}`
-                      : "—";
-                  const scoreTone =
-                    score != null
-                      ? score >= 66
-                        ? "bg-[#e8c9a5] text-[#2d2d2d]"
-                        : score >= 33
-                          ? "bg-[#efe0d0] text-[#2d2d2d]"
-                          : "bg-[#f4ebe4] text-[#5c534c]"
-                      : "bg-[#ebe6df] text-[#8e8e8e]";
-                  const secondary = [r.county_name].filter(Boolean).join(" · ") || "—";
-                  return (
-                    <li
-                      key={r.geoid}
-                      className={`flex items-center gap-2 px-3 py-2.5 transition ${isSel ? "bg-[#f6e9e4]" : "hover:bg-[#faf6f0]"}`}
-                    >
-                      <span className="w-7 shrink-0 text-[11px] tabular-nums text-[#8e8e8e]">
-                        {String(idx + 1).padStart(2, "0")}
-                      </span>
-                      <span
-                        className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums ${scoreTone}`}
-                      >
-                        {scoreDisplay}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onSelectTract(r.geoid)}
-                        className="min-w-0 flex-1 text-left"
-                      >
-                        <p className="truncate text-sm font-semibold text-[#2d2d2d]">{label}</p>
-                        <p className="truncate text-[11px] text-[#8e8e8e]">{secondary}</p>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={inTray ? "Remove from compare" : "Add to compare"}
-                        onClick={() =>
-                          setCompareTray(inTray ? removeFromCompareTray(r.geoid) : addToCompareTray(r.geoid))
-                        }
-                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-base font-semibold transition ${
-                          inTray
-                            ? "bg-[#b34d3a] text-white shadow-sm"
-                            : "border border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/50"
-                        }`}
-                      >
-                        {inTray ? "✓" : "+"}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+            <TopTractsPanel
+              stateFips={stateFips}
+              layerMode={layerMode}
+              selectedGeoid={selectedGeoid}
+              stateLabel={stateLabel}
+              noData={noData}
+              draft={draft}
+              setDraft={setDraft}
+              applied={applied}
+              setApplied={setApplied}
+              compareTray={compareTray}
+              setCompareTray={setCompareTray}
+              onSelectTract={onSelectTract}
+              onRankedChange={setRankedForTray}
+            />
           </div>
         </aside>
       </div>
@@ -1743,7 +924,7 @@ function ExploreInner() {
           </div>
           <div className="flex flex-1 flex-wrap items-center gap-2">
             {compareTray.map((g) => {
-              const row = ranked.find((x) => x.geoid === g);
+              const row = rankedForTray.find((x) => x.geoid === g);
               return (
                 <div
                   key={g}

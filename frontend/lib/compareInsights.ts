@@ -1,8 +1,12 @@
 import { METRIC_KEYS, type MetricKey } from "@/lib/riskScore";
 import { METRIC_LABELS } from "@/lib/metricDisplay";
+import {
+  COMMON_STRESSOR_THRESHOLD,
+  DIVERGENCE_THRESHOLD,
+  INCOME_HIGH_THRESHOLD,
+  INCOME_SURVIVAL_THRESHOLD,
+} from "@/lib/constants";
 
-/** Min normalized (0–100) spread on any single metric to show divergence copy vs. fallback. */
-export const DIVERGENCE_THRESHOLD = 25;
 
 type SeriesRow = Record<string, number | string>;
 
@@ -26,8 +30,8 @@ function appendCommonStressorIncomeContext(
   }
   const maxIncome = Math.max(...incomes);
   const minIncome = Math.min(...incomes);
-  if (maxIncome >= 80000) return "";
-  if (maxIncome < 50000) {
+  if (maxIncome >= INCOME_HIGH_THRESHOLD) return "";
+  if (maxIncome < INCOME_SURVIVAL_THRESHOLD) {
     return " Median household incomes are all below $50k — rent burden likely represents a survival-level cost pressure.";
   }
   const fmt = (n: number) =>
@@ -69,7 +73,7 @@ export function buildCompareInsights(
   const common = METRIC_KEYS.filter((m) =>
     series.every((s) => {
       const v = s[m];
-      return typeof v === "number" && v >= 55;
+      return typeof v === "number" && v >= COMMON_STRESSOR_THRESHOLD;
     })
   );
 

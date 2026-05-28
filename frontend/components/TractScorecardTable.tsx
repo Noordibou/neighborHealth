@@ -2,6 +2,22 @@ import { formatMetricValue, METRIC_LABELS } from "@/lib/metricDisplay";
 import type { TractDetail } from "@/lib/api";
 import { METRIC_KEYS, type MetricKey } from "@/lib/riskScore";
 
+/** Percentile rank text color by burden tier (higher percentile = higher burden). */
+export function percentileBurdenClass(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct)) return "text-nh-brown-muted";
+  if (pct >= 75) return "text-nh-terracotta";
+  if (pct >= 50) return "text-amber-700";
+  if (pct >= 25) return "text-nh-brown-muted";
+  return "text-emerald-700";
+}
+
+function PercentileCell({ value }: { value: number | null | undefined }) {
+  if (value == null || !Number.isFinite(value)) {
+    return <span className="text-nh-brown-muted">—</span>;
+  }
+  return <span className={`tabular-nums font-medium ${percentileBurdenClass(value)}`}>{`${Math.round(value)}th`}</span>;
+}
+
 export function TractScorecardTable({ tract }: { tract: TractDetail }) {
   const byName = new Map(tract.indicators.map((i) => [i.metric_name, i]));
 
@@ -20,7 +36,6 @@ export function TractScorecardTable({ tract }: { tract: TractDetail }) {
         <tbody>
           {METRIC_KEYS.map((key: MetricKey) => {
             const ind = byName.get(key);
-            const nat = ind?.percentile_national;
             const val = ind?.value ?? null;
             const moe = ind?.value_moe;
             const showMoe = moe != null && Number.isFinite(moe);
@@ -67,17 +82,29 @@ export function TractScorecardTable({ tract }: { tract: TractDetail }) {
                     ) : null}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-nh-brown-muted">
-                  {ind?.percentile_county != null ? `${Math.round(ind.percentile_county)}th` : "—"}
+                <td className="px-4 py-3">
+                  <PercentileCell value={ind?.percentile_county} />
                 </td>
-                <td className="px-4 py-3 text-nh-brown-muted">
-                  {ind?.percentile_state != null ? `${Math.round(ind.percentile_state)}th` : "—"}
+                <td className="px-4 py-3">
+                  <PercentileCell value={ind?.percentile_state} />
                 </td>
-                <td className="px-4 py-3 text-nh-brown-muted">{nat != null ? `${Math.round(nat)}th` : "—"}</td>
+                <td className="px-4 py-3">
+                  <PercentileCell value={ind?.percentile_national} />
+                </td>
               </tr>
             );
           })}
         </tbody>
+        <tfoot>
+          <tr>
+            <td
+              colSpan={5}
+              className="px-4 py-2.5 text-[11px] leading-snug text-nh-brown-muted border-t border-nh-brown/5"
+            >
+              Higher percentile = greater burden relative to peers in that geography.
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );

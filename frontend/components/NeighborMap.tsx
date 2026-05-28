@@ -8,6 +8,7 @@ import Map, { Layer, Source, type MapRef } from "react-map-gl/maplibre";
 import type { Map as MapLibreMap, MapLayerMouseEvent } from "maplibre-gl";
 import { BIVARIATE_COLORS } from "@/lib/mapGeojson";
 import { getExploreBrowsePlaceholderView, getExploreUsOverviewView } from "@/lib/exploreMapPlaceholder";
+import { STATE_FIPS_TO_POSTAL } from "@/lib/geo";
 
 // MapLibre GL 4.x requires an explicit worker URL in bundled/Next.js environments.
 // Without this, new Worker("") fails silently and glyphs (required for text labels)
@@ -48,65 +49,10 @@ const METRICS = [
   { id: "heat_index", label: "Heat index (proxy)" },
 ] as const;
 
-/** Census state FIPS (2 digits) → USPS postal abbreviation */
-const US_STATE_FIPS_TO_POSTAL: Record<string, string> = {
-  "01": "AL",
-  "02": "AK",
-  "04": "AZ",
-  "05": "AR",
-  "06": "CA",
-  "08": "CO",
-  "09": "CT",
-  "10": "DE",
-  "11": "DC",
-  "12": "FL",
-  "13": "GA",
-  "15": "HI",
-  "16": "ID",
-  "17": "IL",
-  "18": "IN",
-  "19": "IA",
-  "20": "KS",
-  "21": "KY",
-  "22": "LA",
-  "23": "ME",
-  "24": "MD",
-  "25": "MA",
-  "26": "MI",
-  "27": "MN",
-  "28": "MS",
-  "29": "MO",
-  "30": "MT",
-  "31": "NE",
-  "32": "NV",
-  "33": "NH",
-  "34": "NJ",
-  "35": "NM",
-  "36": "NY",
-  "37": "NC",
-  "38": "ND",
-  "39": "OH",
-  "40": "OK",
-  "41": "OR",
-  "42": "PA",
-  "44": "RI",
-  "45": "SC",
-  "46": "SD",
-  "47": "TN",
-  "48": "TX",
-  "49": "UT",
-  "50": "VT",
-  "51": "VA",
-  "53": "WA",
-  "54": "WV",
-  "55": "WI",
-  "56": "WY",
-};
-
 function statePostalFromFips(fips: string | null | undefined): string | null {
   if (fips == null || typeof fips !== "string") return null;
   const k = fips.padStart(2, "0").slice(0, 2);
-  return US_STATE_FIPS_TO_POSTAL[k] ?? null;
+  return STATE_FIPS_TO_POSTAL[k] ?? null;
 }
 
 function strProp(p: Record<string, unknown>, k: string): string | null {
@@ -387,6 +333,14 @@ function bivariateFillColorExpr(): unknown[] {
   }
   expr.push("#cccccc");
   return expr;
+}
+
+/** Short numeric label for a choropleth legend bound (e.g. "32%" for a pct metric, "47" for composite). */
+function formatLegendBound(value: number, key: string): string {
+  const rounded = Math.round(value);
+  if (key === "composite_score" || key === "nh_map_value" || key === "heat_index") return String(rounded);
+  if (key.endsWith("_pct") || key === "structural_vacancy_rate") return `${rounded}%`;
+  return String(rounded);
 }
 
 function buildChoroplethColorStops(lo: number, hi: number): (number | string)[] {
@@ -762,7 +716,7 @@ function NeighborMapInner({
             {subline ? (
               <p className="mt-0.5 line-clamp-3 text-xs leading-snug text-slate-300">{subline}</p>
             ) : null}
-            <p className="mt-1 font-mono text-[11px] text-slate-400">GEOID {hoverInfo.geoid}</p>
+            <p className="mt-1 font-mono text-[11px] text-slate-400">Tract ID {hoverInfo.geoid}</p>
             {hoverInfo.missingActiveChoropleth ? (
               <p className="mt-2 rounded-md border border-orange-400/55 bg-orange-900/75 px-2 py-1.5 text-[11px] leading-snug text-orange-100">
                 <span className="font-semibold text-orange-200">Map fill:</span> light{" "}
@@ -867,8 +821,8 @@ function NeighborMapInner({
         }}
       />
       <div className="mt-1 flex justify-between text-[10px] text-nh-brown-muted">
-        <span>Lower</span>
-        <span>Higher</span>
+        <span>↓ {choroplethRange != null ? formatLegendBound(colorDomain.lo, effectiveKey) : "Lower"}</span>
+        <span>{choroplethRange != null ? formatLegendBound(colorDomain.hi, effectiveKey) : "Higher"} ↑</span>
       </div>
       <div className="mt-2 flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
         <span
@@ -880,7 +834,7 @@ function NeighborMapInner({
          No data available for this metric
         </p>
       </div>
-      <p className="mt-1.5 max-w-[11rem] text-[9px] leading-snug text-nh-brown-muted">{legendScaleHint}</p>
+      <p className="mt-1.5 max-w-[11rem] text-[11px] leading-snug text-nh-brown-muted">{legendScaleHint}</p>
     </div>
   );
 

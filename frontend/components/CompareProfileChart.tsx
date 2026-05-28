@@ -16,8 +16,7 @@ import { METRIC_LABELS, formatMetricValue } from "@/lib/metricDisplay";
 import { METRIC_KEYS } from "@/lib/riskScore";
 import type { MetricKey } from "@/lib/riskScore";
 import type { IndicatorRow } from "@/lib/api";
-
-const LINE_COLORS = ["#c45c3e", "#2c6e49", "#b8860b", "#2563eb"];
+import { LINE_COLORS } from "@/lib/compareColors";
 
 function ordinalSuffix(n: number): string {
   if (11 <= (n % 100) && (n % 100) <= 13) return "th";

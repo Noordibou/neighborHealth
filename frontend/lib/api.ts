@@ -110,8 +110,14 @@ export function getMapGeoJSON(stateFips: string) {
   return api<GeoJSON.FeatureCollection>(`/api/map/tracts?state_fips=${stateFips}`);
 }
 
+export type StateSummary = {
+  state_fips: string;
+  state_name: string;
+  tract_count: number;
+};
+
 export function getStates() {
-  return api<{ state_fips: string; state_name: string; tract_count: number }[]>(`/api/states`);
+  return api<StateSummary[]>(`/api/states`);
 }
 
 export type IndicatorRow = {
@@ -186,6 +192,31 @@ export function searchSuggest(q: string) {
   return api<{ query: string; items: SearchSuggestItem[] }>(
     `/api/search/suggest?q=${encodeURIComponent(t)}`
   );
+}
+
+export type TractDemographicsRow = {
+  geoid: string;
+  year: number;
+  total_population: number | null;
+  median_age: number | null;
+  pct_white: number | null;
+  pct_black: number | null;
+  pct_hispanic: number | null;
+  pct_asian: number | null;
+  pct_other_race: number | null;
+  pct_non_english_home: number | null;
+  pct_foreign_born: number | null;
+  pct_no_hs_diploma: number | null;
+};
+
+export async function getDemographics(geoid: string): Promise<TractDemographicsRow | null> {
+  const res = await fetch(`${API_BASE}/api/tracts/${geoid}/demographics`, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.json() as Promise<TractDemographicsRow>;
 }
 
 export function postMapTractsByGeoids(geoids: string[]) {
