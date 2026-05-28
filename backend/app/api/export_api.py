@@ -17,7 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models import Indicator, RiskScore, Tract, TractClinic, TractDemographics
-from app.services.pdf_export import build_compare_pdf_bytes, build_pdf_bytes, load_compare_data_for_pdf, write_temp_pdf
+from app.services.pdf_export import (
+    PdfExportUnavailableError,
+    build_compare_pdf_bytes,
+    build_pdf_bytes,
+    load_compare_data_for_pdf,
+    weasyprint_available,
+    write_temp_pdf,
+)
 from app.services.risk_score import METRIC_KEYS
 from app.services.score_recalc import resolve_year
 from app.services.tract_list_filters import (
@@ -29,6 +36,16 @@ from app.services.tract_list_filters import (
 router = APIRouter(prefix="/api/export", tags=["export"])
 
 log = logging.getLogger(__name__)
+
+_PDF_UNAVAILABLE_DETAIL = (
+    "PDF export is not available in this environment (WeasyPrint needs Pango/Cairo). "
+    "CSV exports still work. Run the API in Docker for PDF support."
+)
+
+
+def _require_pdf_export() -> None:
+    if not weasyprint_available():
+        raise HTTPException(status_code=503, detail=_PDF_UNAVAILABLE_DETAIL)
 
 
 async def _delete_after_delay(path: str, delay: float = 5.0) -> None:
@@ -305,6 +322,7 @@ async def export_compare_pdf(
     body: CompareCSVBody,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    _require_pdf_export()
     if len(body.geoids) < 2 or len(body.geoids) > 4:
         raise HTTPException(422, "Provide 2–4 geoids")
     try:
@@ -318,6 +336,8 @@ async def export_compare_pdf(
     except asyncio.TimeoutError:
         log.error("Compare PDF generation timed out")
         raise HTTPException(504, "PDF generation timed out")
+    except PdfExportUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         log.error("Compare PDF generation failed: %s", e, exc_info=True)
         raise HTTPException(500, "PDF generation failed")
@@ -350,6 +370,7 @@ async def export_pdf(
     body: PDFBody,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> PDFJobResponse:
+    _require_pdf_export()
     tract = await session.get(Tract, body.geoid)
     if not tract:
         raise HTTPException(status_code=404, detail="Tract not found")
@@ -361,6 +382,8 @@ async def export_pdf(
     except asyncio.TimeoutError:
         log.error("PDF generation timed out for geoid=%s", body.geoid)
         raise HTTPException(504, "PDF generation timed out")
+    except PdfExportUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     path = write_temp_pdf(data)

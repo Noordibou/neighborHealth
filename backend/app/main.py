@@ -107,5 +107,7 @@ app.include_router(admin_router)
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, str | bool]:
+    from app.services.pdf_export import weasyprint_available
+
+    return {"status": "ok", "pdf_export": weasyprint_available()}

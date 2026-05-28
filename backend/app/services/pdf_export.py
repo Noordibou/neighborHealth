@@ -10,7 +10,6 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from weasyprint import HTML
 
 from app.models import AISummary, Indicator, RiskScore, Tract, TractDemographics
 from app.schemas.tract import CompareResponse, IndicatorOut
@@ -73,6 +72,37 @@ METRIC_LABELS: dict[str, str] = {
 }
 
 DIVERGENCE_THRESHOLD = 25
+
+_WEASYPRINT_AVAILABLE: bool | None = None
+
+
+class PdfExportUnavailableError(RuntimeError):
+    """WeasyPrint or its native libraries (Pango, Cairo) are not available."""
+
+
+def weasyprint_available() -> bool:
+    """True when PDF rendering can run (Docker/local with apt libs; not Vercel serverless)."""
+    global _WEASYPRINT_AVAILABLE
+    if _WEASYPRINT_AVAILABLE is not None:
+        return _WEASYPRINT_AVAILABLE
+    try:
+        from weasyprint import HTML  # noqa: F401
+
+        _WEASYPRINT_AVAILABLE = True
+    except (ImportError, OSError):
+        _WEASYPRINT_AVAILABLE = False
+    return _WEASYPRINT_AVAILABLE
+
+
+def _html_to_pdf(html: str) -> bytes:
+    if not weasyprint_available():
+        raise PdfExportUnavailableError(
+            "PDF export requires WeasyPrint system libraries (Pango, Cairo). "
+            "Use Docker for the API or deploy PDF export on a host with those packages installed."
+        )
+    from weasyprint import HTML
+
+    return HTML(string=html).write_pdf()
 
 
 def format_metric_value(metric: str, value: float | None) -> str:
@@ -308,7 +338,7 @@ def build_compare_pdf_bytes(compare_data: dict[str, Any]) -> bytes:
         metrics=metrics_out,
         insights=insights,
     )
-    return HTML(string=html).write_pdf()
+    return _html_to_pdf(html)
 
 
 async def load_compare_data_for_pdf(
@@ -421,7 +451,7 @@ async def build_pdf_bytes(session: AsyncSession, geoid: str, year: int | None) -
         indicators=indicators,
         ai_text=ai_text,
     )
-    return HTML(string=html).write_pdf()
+    return _html_to_pdf(html)
 
 
 def write_temp_pdf(data: bytes) -> Path:
