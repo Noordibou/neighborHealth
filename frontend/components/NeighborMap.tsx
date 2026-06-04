@@ -421,10 +421,13 @@ function NeighborMapInner({
     return numericPropertyRange(data, effectiveKey);
   }, [data, effectiveKey, choroplethStyle]);
 
-  const colorDomain = useMemo(
-    () => choroplethDomain(choroplethRange, effectiveKey),
-    [choroplethRange, effectiveKey]
-  );
+  const colorDomain = useMemo(() => {
+    // nh_map_value carries composite scores or normalized component-score blends,
+    // all on the same 0–100 national scale.  Use a fixed domain so the same shade
+    // represents the same burden level regardless of which state is loaded.
+    if (effectiveKey === "nh_map_value") return { lo: 0, hi: 100 };
+    return choroplethDomain(choroplethRange, effectiveKey);
+  }, [choroplethRange, effectiveKey]);
 
   const colorStops = useMemo(
     () => buildChoroplethColorStops(colorDomain.lo, colorDomain.hi),
@@ -776,9 +779,11 @@ function NeighborMapInner({
 
   const legendMetricLabel = fillProperty ? fillLabel : METRICS.find((m) => m.id === effectiveKey)?.label ?? "Choropleth";
   const legendScaleHint =
-    choroplethRange != null
-      ? `Scale spans ~${Math.round(colorDomain.lo)}–${Math.round(colorDomain.hi)} on tracts shown here so similar values read as different shades.`
-      : "No numeric values found for this metric on the current layer.";
+    effectiveKey === "nh_map_value"
+      ? "Scale: 0–100 normalized across the national cohort. Same shade = same burden level in every state."
+      : choroplethRange != null
+        ? `Scale spans ~${Math.round(colorDomain.lo)}–${Math.round(colorDomain.hi)} on tracts shown here so similar values read as different shades.`
+        : "No numeric values found for this metric on the current layer.";
 
   const bivariateLegend =
     choroplethStyle === "bivariate" ? (
@@ -821,8 +826,11 @@ function NeighborMapInner({
         }}
       />
       <div className="mt-1 flex justify-between text-[10px] text-nh-brown-muted">
-        <span>↓ {choroplethRange != null ? formatLegendBound(colorDomain.lo, effectiveKey) : "Lower"}</span>
-        <span>{choroplethRange != null ? formatLegendBound(colorDomain.hi, effectiveKey) : "Higher"} ↑</span>
+        <span>↓ {(effectiveKey === "nh_map_value" || choroplethRange != null) ? formatLegendBound(colorDomain.lo, effectiveKey) : "Lower"}</span>
+        {effectiveKey === "nh_map_value" ? (
+          <span className="text-nh-brown-muted/50">50</span>
+        ) : null}
+        <span>{(effectiveKey === "nh_map_value" || choroplethRange != null) ? formatLegendBound(colorDomain.hi, effectiveKey) : "Higher"} ↑</span>
       </div>
       <div className="mt-2 flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
         <span

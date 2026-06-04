@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { TrendChartProps } from "@/components/TrendChart";
+import type { TrendChartProps } from "@/types";
 
 const TrendChartImpl = dynamic(
   () => import("@/components/TrendChart").then((m) => ({ default: m.TrendChart })),

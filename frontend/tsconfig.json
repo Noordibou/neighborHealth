@@ -24,6 +24,12 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@/types": [
+        "./types/index.ts"
+      ],
+      "@/types/*": [
+        "./types/*"
       ]
     },
     "target": "ES2017"

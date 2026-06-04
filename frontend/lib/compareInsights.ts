@@ -6,12 +6,11 @@ import {
   INCOME_HIGH_THRESHOLD,
   INCOME_SURVIVAL_THRESHOLD,
 } from "@/lib/constants";
+import type { CompareDemographicsIncomeMap } from "@/types";
 
+export type { CompareDemographicsIncomeMap };
 
 type SeriesRow = Record<string, number | string>;
-
-/** Optional median income per GEOID for Common stressor copy (from tract detail + compare page). */
-export type CompareDemographicsIncomeMap = Record<string, { median_household_income: number | null } | null>;
 
 function appendCommonStressorIncomeContext(
   series: SeriesRow[],

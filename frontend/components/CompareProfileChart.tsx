@@ -13,9 +13,8 @@ import {
 } from "recharts";
 import type { TooltipContentProps } from "recharts";
 import { METRIC_LABELS, formatMetricValue } from "@/lib/metricDisplay";
-import { METRIC_KEYS } from "@/lib/riskScore";
-import type { MetricKey } from "@/lib/riskScore";
-import type { IndicatorRow } from "@/lib/api";
+import { METRIC_KEYS } from "@/types";
+import type { MetricKey, IndicatorRow } from "@/types";
 import { LINE_COLORS } from "@/lib/compareColors";
 
 function ordinalSuffix(n: number): string {

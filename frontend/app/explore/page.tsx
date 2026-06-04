@@ -5,9 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { MapRef } from "react-map-gl/maplibre";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrandWordmark } from "@/components/BrandMark";
+import { SiteFooter } from "@/components/SiteFooter";
 import { BivariateLegend } from "@/components/BivariateLegend";
 import { NeighborMap } from "@/components/NeighborMap";
-import { TopTractsPanel, type RankedTractRow } from "@/components/TopTractsPanel";
+import { TopTractsPanel } from "@/components/TopTractsPanel";
 import { TractDetailPanel } from "@/components/TractDetailPanel";
 import {
   API_BASE,
@@ -15,19 +16,26 @@ import {
   getStates,
   getTract,
   postMapTractsByGeoids,
-  type SearchResultRow,
-  type TractDetail,
 } from "@/lib/api";
+import type {
+  SearchResultRow,
+  TractDetail,
+  ExploreLayerMode,
+  MapLayerMode,
+  MapMode,
+  RankedTractRow,
+  ExploreMapSessionV1,
+  StateSummary,
+} from "@/types";
 import { addToCompareTray, readCompareTray, removeFromCompareTray, writeCompareTray } from "@/lib/compareTray";
 import {
   EXPLORE_MAP_SESSION_KEY,
-  type ExploreMapSessionV1,
   parseExploreMapSession,
   serializeExploreMapSession,
 } from "@/lib/exploreMapSession";
-import { applyLayerMode, augmentGeoJSONForYear, type MapLayerMode } from "@/lib/mapGeojson";
+import { applyLayerMode, augmentGeoJSONForYear } from "@/lib/mapGeojson";
 import { SCORE_THRESHOLDS } from "@/lib/constants";
-import { parseExploreUrl, useExploreUrlSync, type ExploreLayerMode } from "./useExploreUrlSync";
+import { parseExploreUrl, useExploreUrlSync } from "./useExploreUrlSync";
 import { useExploreSearch } from "./useExploreSearch";
 
 function mapFillLabel(mode: ExploreLayerMode): string {
@@ -50,8 +58,6 @@ function priorityFlagCopy(mode: ExploreLayerMode): string {
   if (mode === "health") return `flagged priority (health blend ≥ ${SCORE_THRESHOLDS.mapFlagHealth})`;
   return "in high-overlap zone (class 3-3)";
 }
-
-type MapMode = "browse" | "search";
 
 function ExploreInner() {
   const router = useRouter();
@@ -77,9 +83,7 @@ function ExploreInner() {
   const [selectedDetail, setSelectedDetail] = useState<TractDetail | null>(null);
   const [selectedDetailErr, setSelectedDetailErr] = useState<string | null>(null);
   const [shareHint, setShareHint] = useState<string | null>(null);
-  const [availableStates, setAvailableStates] = useState<
-    { state_fips: string; state_name: string; tract_count: number }[]
-  >([]);
+  const [availableStates, setAvailableStates] = useState<StateSummary[]>([]);
   const [usStatesGeojson, setUsStatesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
 
   const [draft, setDraft] = useState({
@@ -486,6 +490,7 @@ function ExploreInner() {
   const mapDataBrowse = augmentedBrowse ?? geojson;
   const mapDataSearch = augmentedSearch ?? searchGeojson;
   return (
+    <>
     <div className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden text-nh-brown">
       <header className="shrink-0 border-b border-nh-brown/10 bg-nh-cream/95 px-4 py-3">
         <div className="mx-auto flex max-w-[1920px] flex-wrap items-center justify-between gap-3">
@@ -956,6 +961,10 @@ function ExploreInner() {
         </div>
       </div>
     </div>
+    <div className="pb-[9.5rem] sm:pb-36 xl:pb-16">
+      <SiteFooter />
+    </div>
+    </>
   );
 
 }

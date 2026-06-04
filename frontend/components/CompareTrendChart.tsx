@@ -11,14 +11,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { TractScorePoint } from "@/lib/api";
 import { LINE_COLORS } from "@/lib/compareColors";
-
-type TractTrendSeries = {
-  geoid: string;
-  label: string;
-  trend: TractScorePoint[] | null;
-};
+import type { TractTrendSeries } from "@/types";
 
 export function CompareTrendChart({ series }: { series: TractTrendSeries[] }) {
   const { chartData, lines, unavailable } = useMemo(() => {

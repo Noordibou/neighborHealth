@@ -1,4 +1,4 @@
-import type { AppliedFilters } from "@/app/explore/useExploreUrlSync";
+import type { AppliedFilters } from "@/types";
 
 export function hasActiveExploreFilters(applied: AppliedFilters): boolean {
   return (

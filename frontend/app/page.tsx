@@ -12,8 +12,8 @@ export default function LandingPage() {
               <span className="text-nh-terracotta italic">health risk overlap.</span>
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-nh-brown-muted">
-              NeighborHealth combines HUD housing indicators and CDC PLACES health estimates into a composite
-              prioritization index so outreach teams can see where to focus first.
+              NeighborHealth combines ACS housing indicators and CDC PLACES health estimates into a composite
+              prioritization index so outreach teams, health departments, and grant writers can see where to focus first.
             </p>
             <form action="/explore" method="get" className="mt-8">
               <div className="flex flex-col gap-2 rounded-2xl border border-nh-brown/10 bg-white p-1.5 shadow-sm sm:flex-row sm:items-center">
@@ -50,9 +50,9 @@ export default function LandingPage() {
             </p>
             <dl className="mt-10 grid grid-cols-2 gap-6 sm:grid-cols-4">
               {[
-                { k: "Tracts analyzed", v: "73,056" },
+                { k: "Tracts scored", v: "~28,000" },
                 { k: "Indicators", v: "18" },
-                { k: "Last refresh", v: "Apr 2024" },
+                { k: "Data vintage", v: "ACS 2022" },
               ].map((row) => (
                 <div key={row.k}>
                   <dt className="text-[10px] font-bold uppercase tracking-wider text-nh-brown-muted">{row.k}</dt>
@@ -92,18 +92,18 @@ export default function LandingPage() {
         <div className="grid gap-8 md:grid-cols-3">
           {[
             {
-              title: "Identify high-risk neighborhoods",
-              body: "Rank census tracts with a transparent composite of rent burden, insurance coverage, chronic conditions, overcrowding, and asthma burden.",
+              title: "Identify high-burden neighborhoods",
+              body: "Rank census tracts by a composite of rent burden, uninsurance, overcrowding, mental health, and asthma. View bivariate overlap mode to see where housing stress and health burden co-occur.",
               href: "/explore",
             },
             {
               title: "Compare areas side by side",
-              body: "Collect up to four tracts in the compare tray and open a side-by-side profile with charts and raw indicators.",
+              body: "Collect up to four tracts in the compare tray and open a side-by-side profile with 3-year trend charts, demographics, and nearby FQHC clinics.",
               href: "/compare",
             },
             {
               title: "Export reports for stakeholders",
-              body: "Download tract PDF scorecards and CSV exports for grants and policy memos—with citations to public sources.",
+              body: "Download tract PDF scorecards, filtered-list CSVs for grant targeting, and compare PDFs—each with source citations and data vintage.",
               href: "/about",
             },
           ].map((card) => (
@@ -135,17 +135,17 @@ export default function LandingPage() {
               {
                 n: "01",
                 t: "Pull source data",
-                d: "Ingest HUD CHAS / ACS housing fields and CDC PLACES tract estimates aligned by GEOID and vintage.",
+                d: "Ingest ACS 5-year housing tables and CDC PLACES tract health estimates, aligned by GEOID and data vintage. HRSA FQHC locations are loaded separately.",
               },
               {
                 n: "02",
                 t: "Normalize & weight",
-                d: "Percentile-transform indicators, handle missing values explicitly, and combine with adjustable weights in the explorer.",
+                d: "Min-max normalize each metric to 0–100 across the scored cohort, then combine with domain-informed weights: rent burden 25%, uninsurance 20%, overcrowding 20%, mental health 15%, asthma 10%, structural vacancy 5%, heat index 5%.",
               },
               {
                 n: "03",
                 t: "Surface priorities",
-                d: "Choropleth shading, ranked lists, tract profiles, and compare mode translate scores into action-ready views.",
+                d: "Choropleth shading, bivariate overlap mode, ranked lists, tract profiles with 3-year trends, and compare mode translate scores into action-ready views.",
               },
             ].map((s) => (
               <div key={s.n}>
@@ -158,7 +158,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <SiteFooter variant="dark" />
+      <SiteFooter />
     </div>
   );
 }

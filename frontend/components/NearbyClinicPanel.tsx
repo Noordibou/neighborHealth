@@ -2,19 +2,7 @@
 
 import { API_BASE } from "@/lib/api";
 import { useEffect, useState } from "react";
-
-type NearbyClinicPayload = {
-  clinic_id: number;
-  name: string;
-  address: string | null;
-  city: string | null;
-  zip_code: string | null;
-  latitude: number;
-  longitude: number;
-  distance_miles: number;
-  rank: number;
-  site_type: string | null;
-};
+import type { NearbyClinicPayload } from "@/types";
 
 function MapPinIcon({ className }: { className?: string }) {
   return (

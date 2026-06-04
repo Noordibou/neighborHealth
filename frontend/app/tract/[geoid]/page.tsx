@@ -38,8 +38,8 @@ export default async function TractPage({ params }: Props) {
 
   if (!tract) {
     return (
-      <div className="min-h-screen bg-nh-cream text-nh-brown">
-        <div className="mx-auto max-w-3xl px-4 py-12">
+      <div className="flex min-h-screen flex-col bg-nh-cream text-nh-brown">
+        <div className="mx-auto max-w-3xl flex-1 px-4 py-12">
           <TractMapBackControl />
           <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
             <h1 className="font-display text-2xl font-semibold text-nh-brown">Tract profile unavailable</h1>
@@ -48,7 +48,7 @@ export default async function TractPage({ params }: Props) {
               running or an incorrect `NEXT_PUBLIC_API_URL`.
             </p>
             <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-xs text-nh-brown-muted">
-              GEOID: <span className="font-mono">{geoid}</span>
+              Census tract ID: <span className="font-mono">{geoid}</span>
               {unavailableMessage ? (
                 <>
                   {" "}
@@ -58,6 +58,7 @@ export default async function TractPage({ params }: Props) {
             </p>
           </div>
         </div>
+        <SiteFooter />
       </div>
     );
   }
@@ -74,7 +75,7 @@ export default async function TractPage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-nh-cream text-nh-brown">
-      <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mx-auto max-w-6xl px-4 pt-12">
         <TractMapBackControl />
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -179,7 +180,7 @@ export default async function TractPage({ params }: Props) {
           unavailable={!summary?.summary_text}
         />
 
-        <section className="mt-10 rounded-2xl border border-nh-brown/10 bg-white/80 p-5 text-xs leading-relaxed text-nh-brown-muted">
+        <section className="my-10 rounded-2xl border border-nh-brown/10 bg-white/80 p-5 text-xs leading-relaxed text-nh-brown-muted">
           <p className="font-semibold text-nh-brown">Data sources</p>
           <p className="mt-2">
             CDC PLACES (tract estimates), U.S. Census Bureau ACS 5-year (housing), HUD CHAS where available, and

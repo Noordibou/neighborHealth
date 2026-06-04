@@ -1,5 +1,5 @@
 import { buildFilteredTractsExportQuery, hasActiveExploreFilters } from "@/lib/exploreExport";
-import type { AppliedFilters } from "@/app/explore/useExploreUrlSync";
+import type { AppliedFilters } from "@/types";
 
 const DEFAULT: AppliedFilters = {
   minScore: 0,

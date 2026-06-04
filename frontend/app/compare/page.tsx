@@ -24,13 +24,16 @@ import {
   getCompare,
   getTract,
   getTractTrend,
-  type IndicatorRow,
-  type TractDemographicsRow,
 } from "@/lib/api";
-import { buildCompareInsights, type CompareDemographicsIncomeMap } from "@/lib/compareInsights";
-import { METRIC_KEYS } from "@/lib/riskScore";
+import type {
+  IndicatorRow,
+  TractDemographicsRow,
+  MetricKey,
+  CompareDemographicsIncomeMap,
+} from "@/types";
+import { METRIC_KEYS } from "@/types";
+import { buildCompareInsights } from "@/lib/compareInsights";
 import { METRIC_LABELS, formatMetricValue } from "@/lib/metricDisplay";
-import type { MetricKey } from "@/lib/riskScore";
 import { LINE_COLORS } from "@/lib/compareColors";
 import { RACE_SEGMENTS } from "@/lib/demographics";
 import { SCORE_THRESHOLDS } from "@/lib/constants";

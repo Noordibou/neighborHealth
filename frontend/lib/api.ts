@@ -1,3 +1,15 @@
+import type {
+  TractSummary,
+  TractDetail,
+  TractScoreTrendPayload,
+  StateSummary,
+  SearchResultRow,
+  AddressSearchResponse,
+  SearchSuggestItem,
+  TractDemographicsRow,
+  IndicatorRow,
+} from "@/types";
+
 function normalizeApiBase(raw: string): string {
   const t = (raw || "").trim().replace(/\/+$/, "");
   if (!t) return "http://localhost:8000";
@@ -25,55 +37,6 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export type TractSummary = {
-  geoid: string;
-  name: string | null;
-  state_fips: string;
-  county_fips: string;
-  county_name: string | null;
-  place_name: string | null;
-  composite_score: number | null;
-  /** Present on `/api/tracts` list when backend supports `sort_by`; same units as the active layer. */
-  layer_value?: number | null;
-  year: number | null;
-};
-
-export type DisplayIndicator = {
-  metric_name: string;
-  display_name: string;
-  value: number | null;
-  source: string;
-};
-
-export type TractDetail = TractSummary & {
-  centroid_lat: number | null;
-  centroid_lon: number | null;
-  median_rent: number | null;
-  median_household_income: number | null;
-  indicators: {
-    source: string;
-    metric_name: string;
-    value: number | null;
-    value_moe: number | null;
-    year: number;
-    percentile_national: number | null;
-    percentile_state: number | null;
-    percentile_county: number | null;
-  }[];
-  display_indicators: DisplayIndicator[];
-  risk_score: {
-    composite_score: number;
-    component_scores: Record<string, number> | null;
-    year: number;
-    rank?: number | null;
-    rank_total?: number | null;
-  } | null;
-  /** True when ≥2 years of risk_scores exist (enables trend chart). */
-  has_trend?: boolean;
-  /** Weighted sum of state percentile ranks (0–100); state-relative composite. */
-  state_composite_score?: number | null;
-};
-
 export function getTractList(params: Record<string, string | undefined>) {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
@@ -85,17 +48,6 @@ export function getTractList(params: Record<string, string | undefined>) {
 export function getTract(geoid: string) {
   return api<TractDetail>(`/api/tracts/${geoid}`);
 }
-
-export type TractScorePoint = {
-  year: number;
-  composite_score: number;
-  data_quality_note: string | null;
-};
-
-export type TractScoreTrendPayload = {
-  geoid: string;
-  trend: TractScorePoint[];
-};
 
 export function getTractTrend(geoid: string) {
   return api<TractScoreTrendPayload>(`/api/tracts/${geoid}/trend`);
@@ -110,26 +62,9 @@ export function getMapGeoJSON(stateFips: string) {
   return api<GeoJSON.FeatureCollection>(`/api/map/tracts?state_fips=${stateFips}`);
 }
 
-export type StateSummary = {
-  state_fips: string;
-  state_name: string;
-  tract_count: number;
-};
-
 export function getStates() {
   return api<StateSummary[]>(`/api/states`);
 }
-
-export type IndicatorRow = {
-  source: string;
-  metric_name: string;
-  value: number | null;
-  value_moe: number | null;
-  year: number;
-  percentile_national: number | null;
-  percentile_state: number | null;
-  percentile_county: number | null;
-};
 
 export function getCompare(geoids: string[]) {
   const q = geoids.join(",");
@@ -142,31 +77,12 @@ export function getCompare(geoids: string[]) {
   }>(`/api/compare?geoids=${encodeURIComponent(q)}`);
 }
 
-export type SearchResultRow = {
-  geoid: string;
-  name: string | null;
-  state_fips: string;
-  county_name: string | null;
-  composite_score: number | null;
-};
-
 export function searchTracts(q: string, opts?: { stateFips?: string; limit?: number }) {
   const p = new URLSearchParams({ q: q.trim() });
   if (opts?.stateFips) p.set("state_fips", opts.stateFips);
   if (opts?.limit != null) p.set("limit", String(opts.limit));
   return api<{ query: string; results: SearchResultRow[] }>(`/api/search?${p.toString()}`);
 }
-
-export type AddressSearchResponse = {
-  query: string;
-  matched_address: string | null;
-  longitude: number | null;
-  latitude: number | null;
-  results: SearchResultRow[];
-  census_tract_geoid: string | null;
-  resolver: "none" | "census_geographies" | "postgis_point";
-  message: string | null;
-};
 
 /** U.S. Census Bureau geocoder + local tract lookup (no Mapbox key). */
 export function searchFromAddress(address: string, stateFips?: string) {
@@ -178,14 +94,6 @@ export function searchFromAddress(address: string, stateFips?: string) {
   });
 }
 
-export type SearchSuggestItem = {
-  kind: "state" | "county" | "place";
-  label: string;
-  detail?: string | null;
-  query: string;
-  state_fips?: string | null;
-};
-
 export function searchSuggest(q: string) {
   const t = q.trim();
   if (t.length < 2) return Promise.resolve({ query: t, items: [] as SearchSuggestItem[] });
@@ -193,21 +101,6 @@ export function searchSuggest(q: string) {
     `/api/search/suggest?q=${encodeURIComponent(t)}`
   );
 }
-
-export type TractDemographicsRow = {
-  geoid: string;
-  year: number;
-  total_population: number | null;
-  median_age: number | null;
-  pct_white: number | null;
-  pct_black: number | null;
-  pct_hispanic: number | null;
-  pct_asian: number | null;
-  pct_other_race: number | null;
-  pct_non_english_home: number | null;
-  pct_foreign_born: number | null;
-  pct_no_hs_diploma: number | null;
-};
 
 export async function getDemographics(geoid: string): Promise<TractDemographicsRow | null> {
   const res = await fetch(`${API_BASE}/api/tracts/${geoid}/demographics`, {

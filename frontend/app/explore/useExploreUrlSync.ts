@@ -4,30 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MapRef } from "react-map-gl/maplibre";
 import { isExploreBrowsePlaceholderViewport } from "@/lib/exploreMapPlaceholder";
-import type { MapLayerMode } from "@/lib/mapGeojson";
+import type {
+  ExploreLayerMode,
+  AppliedFilters,
+  DraftFilters,
+  Viewport,
+} from "@/types";
 
-export type ExploreLayerMode = MapLayerMode | "overlap";
-
-type Viewport = { lng: number; lat: number; zoom: number };
-
-export type AppliedFilters = {
-  minScore: number;
-  minPopulation: number;
-  excludeInstitutional: boolean;
-  minRent: number;
-  minUninsured: number;
-  asthmaHigh: boolean;
-  urbanRural: "" | "urban" | "rural";
-  clinicDist: "" | "1" | "2" | "5" | "over5";
-};
-
-export type DraftFilters = {
-  minScore: number;
-  minRent: number;
-  minUninsured: number;
-  asthma: number;
-  urbanRural: "" | "urban" | "rural";
-};
+export type { ExploreLayerMode, AppliedFilters, DraftFilters };
 
 function paramsEqual(a: URLSearchParams, b: URLSearchParams): boolean {
   const keys = new Set<string>();

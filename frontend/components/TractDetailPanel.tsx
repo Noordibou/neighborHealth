@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { TractDetail } from "@/lib/api";
+import type { TractDetail } from "@/types";
 import { METRIC_LABELS } from "@/lib/metricDisplay";
 
 const SIDEBAR_METRIC_KEYS = [

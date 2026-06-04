@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { DisplayIndicator } from "@/lib/api";
+import type { DisplayIndicator } from "@/types";
 
 type Props = {
   indicators: DisplayIndicator[];

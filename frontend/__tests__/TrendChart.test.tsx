@@ -17,7 +17,7 @@ import {
   TrendChart,
   TrendDot,
 } from "@/components/TrendChart";
-import type { TractScorePoint } from "@/lib/api";
+import type { TractScorePoint } from "@/types";
 
 // ─── filterToLastNYears ──────────────────────────────────────────────────────
 

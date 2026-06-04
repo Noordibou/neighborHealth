@@ -4,21 +4,7 @@ import { API_BASE } from "@/lib/api";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { RACE_SEGMENTS } from "@/lib/demographics";
 import { CollapseChevron } from "@/components/CollapseChevron";
-
-type TractDemographicsPayload = {
-  geoid: string;
-  year: number;
-  total_population: number | null;
-  median_age: number | null;
-  pct_white: number | null;
-  pct_black: number | null;
-  pct_hispanic: number | null;
-  pct_asian: number | null;
-  pct_other_race: number | null;
-  pct_non_english_home: number | null;
-  pct_foreign_born: number | null;
-  pct_no_hs_diploma: number | null;
-};
+import type { TractDemographicsRow } from "@/types";
 
 function dashNum(v: number | null | undefined, digits: number): string {
   if (v == null || !Number.isFinite(v)) return "—";
@@ -57,7 +43,7 @@ function DemographicsSkeleton() {
   );
 }
 
-function RaceEthnicityBar({ data }: { data: TractDemographicsPayload }) {
+function RaceEthnicityBar({ data }: { data: TractDemographicsRow }) {
   const segments = RACE_SEGMENTS.map((s) => ({
     ...s,
     pct: data[s.key],
@@ -111,7 +97,7 @@ function RaceEthnicityBar({ data }: { data: TractDemographicsPayload }) {
 
 export function DemographicsPanel({ geoid }: { geoid: string }) {
   const [state, setState] = useState<"loading" | "absent" | "ready">("loading");
-  const [data, setData] = useState<TractDemographicsPayload | null>(null);
+  const [data, setData] = useState<TractDemographicsRow | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
 
   useLayoutEffect(() => {
@@ -140,7 +126,7 @@ export function DemographicsPanel({ geoid }: { geoid: string }) {
           setData(null);
           return;
         }
-        const json = (await res.json()) as TractDemographicsPayload;
+        const json = (await res.json()) as TractDemographicsRow;
         setData(json);
         setState("ready");
       } catch {

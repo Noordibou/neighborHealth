@@ -7,9 +7,8 @@ import {
   searchFromAddress,
   searchSuggest,
   searchTracts,
-  type SearchResultRow,
-  type SearchSuggestItem,
 } from "@/lib/api";
+import type { SearchResultRow, SearchSuggestItem } from "@/types";
 
 function looksLikeUsStreetAddress(s: string): boolean {
   const t = s.trim();

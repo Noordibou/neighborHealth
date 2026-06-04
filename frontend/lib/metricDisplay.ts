@@ -1,4 +1,5 @@
-import { METRIC_KEYS, type MetricKey } from "@/lib/riskScore";
+import { METRIC_KEYS } from "@/lib/riskScore";
+import type { MetricKey } from "@/types";
 
 // Includes all scored MetricKeys, disability_pct (stored, display-only, not scored),
 // and the 6 additional PLACES display-only indicators.

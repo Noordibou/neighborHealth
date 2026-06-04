@@ -2,8 +2,8 @@
 
 import { MetricCard } from "@/components/MetricCard";
 import { formatMetricValue, METRIC_LABELS } from "@/lib/metricDisplay";
-import type { TractDetail } from "@/lib/api";
-import { METRIC_KEYS, type MetricKey } from "@/lib/riskScore";
+import type { TractDetail, MetricKey } from "@/types";
+import { METRIC_KEYS } from "@/types";
 
 function iconFor(metric: MetricKey) {
   const common = "h-5 w-5";

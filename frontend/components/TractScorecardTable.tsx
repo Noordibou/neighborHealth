@@ -1,6 +1,6 @@
 import { formatMetricValue, METRIC_LABELS } from "@/lib/metricDisplay";
-import type { TractDetail } from "@/lib/api";
-import { METRIC_KEYS, type MetricKey } from "@/lib/riskScore";
+import type { TractDetail, MetricKey } from "@/types";
+import { METRIC_KEYS } from "@/types";
 
 /** Percentile rank text color by burden tier (higher percentile = higher burden). */
 export function percentileBurdenClass(pct: number | null | undefined): string {

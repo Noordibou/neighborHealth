@@ -5,7 +5,12 @@ import { API_BASE, getTractList } from "@/lib/api";
 import { addToCompareTray, removeFromCompareTray } from "@/lib/compareTray";
 import { HIGH_ASTHMA_THRESHOLD, SCORE_HIGH_THRESHOLD, SCORE_MID_THRESHOLD } from "@/lib/constants";
 import { buildFilteredTractsExportQuery, hasActiveExploreFilters } from "@/lib/exploreExport";
-import type { AppliedFilters, DraftFilters, ExploreLayerMode } from "@/app/explore/useExploreUrlSync";
+import type {
+  AppliedFilters,
+  DraftFilters,
+  ExploreLayerMode,
+  RankedTractRow,
+} from "@/types";
 
 const TOP_TRACT_LAYER_HEADING: Record<ExploreLayerMode, string> = {
   composite: "Composite index",
@@ -26,14 +31,6 @@ const LAYER_SORT_API: Record<ExploreLayerMode, "composite" | "housing" | "health
   housing: "housing",
   health: "health",
   overlap: "composite",
-};
-
-export type RankedTractRow = {
-  geoid: string;
-  composite_score: number | null;
-  layer_value: number | null;
-  name: string | null;
-  county_name: string | null;
 };
 
 export function TopTractsPanel({

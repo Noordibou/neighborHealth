@@ -3,7 +3,8 @@
  * Adds bivariate classification props (`nh_housing_*`, `nh_health_*`, `nh_bivariate_class`, raw blends)
  * for a 3×3 housing stress × health burden matrix (tertiles across the current feature set).
  */
-export type MapLayerMode = "composite" | "housing" | "health";
+import type { MapLayerMode } from "@/types";
+export type { MapLayerMode };
 
 /** Fill colors for bivariate class keys `"<housing>-<health>"` e.g. `"1-1"` … `"3-3"`. */
 export const BIVARIATE_COLORS: Record<string, string> = {
@@ -18,6 +19,13 @@ export const BIVARIATE_COLORS: Record<string, string> = {
   "3-3": "#574249",
 };
 
+/**
+ * Minimum number of component-score metrics that must be non-null to produce a
+ * blend value.  Tracts with fewer available metrics return null (no-data fill).
+ * Requiring 2-of-3 prevents a single metric from masquerading as a full blend.
+ */
+const MIN_METRICS_FOR_BLEND = 2;
+
 function numProp(p: Record<string, unknown>, k: string): number | null {
   const v = p[k];
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -28,23 +36,37 @@ function numProp(p: Record<string, unknown>, k: string): number | null {
   return null;
 }
 
-/** Mean of two metrics; if one is missing, returns the other; both missing → null. */
+/**
+ * Housing stress blend from normalized component scores (cs_ prefix, 0–100).
+ * Uses rent burden, overcrowding, and structural vacancy.
+ * Requires at least MIN_METRICS_FOR_BLEND of the three to be non-null.
+ * Raw percentage properties are still present on features for backward compat
+ * but are NOT used here — raw values are on different scales and would
+ * suppress overcrowding (narrow range) against rent burden (wide range).
+ */
 function housingStressRawFromProps(p: Record<string, unknown>): number | null {
-  const rent = numProp(p, "rent_burden_pct");
-  const crowd = numProp(p, "overcrowding_pct");
-  if (rent != null && crowd != null) return (rent + crowd) / 2;
-  if (rent != null) return rent;
-  if (crowd != null) return crowd;
-  return null;
+  const a = numProp(p, "cs_rent_burden_pct");
+  const b = numProp(p, "cs_overcrowding_pct");
+  const c = numProp(p, "cs_structural_vacancy_rate");
+  const nums = [a, b, c].filter((x): x is number => x != null);
+  return nums.length >= MIN_METRICS_FOR_BLEND
+    ? nums.reduce((s, x) => s + x, 0) / nums.length
+    : null;
 }
 
-/** Mean of available health burden metrics; none present → null. */
+/**
+ * Health burden blend from normalized component scores (cs_ prefix, 0–100).
+ * Uses uninsured rate, asthma prevalence, and mental health prevalence.
+ * Requires at least MIN_METRICS_FOR_BLEND of the three to be non-null.
+ */
 function healthBurdenRawFromProps(p: Record<string, unknown>): number | null {
-  const a = numProp(p, "uninsured_pct");
-  const b = numProp(p, "asthma_pct");
-  const c = numProp(p, "mental_health_pct");
+  const a = numProp(p, "cs_uninsured_pct");
+  const b = numProp(p, "cs_asthma_pct");
+  const c = numProp(p, "cs_mental_health_pct");
   const nums = [a, b, c].filter((x): x is number => x != null);
-  return nums.length ? nums.reduce((s, x) => s + x, 0) / nums.length : null;
+  return nums.length >= MIN_METRICS_FOR_BLEND
+    ? nums.reduce((s, x) => s + x, 0) / nums.length
+    : null;
 }
 
 /**
@@ -72,6 +94,11 @@ function classifyTertile(value: number | null, breaks: [number, number] | null):
  * Layer 1 (expensive): compute bivariate class + housing/health properties for every feature.
  * Results depend only on the raw GeoJSON values — not on which layer tab is active.
  * Call this once when GeoJSON loads; memoize on [geojson] reference only.
+ *
+ * Housing and health blends use normalized component scores (cs_ prefix) so that
+ * all three contributing metrics are on the same 0–100 scale before blending.
+ * This keeps the bivariate classification consistent with the Health and Housing
+ * choropleth layers.
  */
 export function augmentGeoJSONForYear(
   fc: GeoJSON.FeatureCollection
@@ -114,6 +141,13 @@ export function augmentGeoJSONForYear(
  * Mutates feature properties in place (no new feature objects) and returns a new
  * FeatureCollection wrapper so React detects a reference change and MapLibre's
  * Source component calls source.setData() to refresh tile rendering.
+ *
+ * All three modes produce values on the same 0–100 normalized scale so the
+ * fixed-domain choropleth in NeighborMap renders consistently across states.
+ *
+ * - composite: uses the stored composite_score (0–100, pre-normalized nationally)
+ * - housing:   blends cs_rent_burden_pct + cs_overcrowding_pct + cs_structural_vacancy_rate
+ * - health:    blends cs_uninsured_pct + cs_asthma_pct + cs_mental_health_pct
  */
 export function applyLayerMode(
   fc: GeoJSON.FeatureCollection | null,
@@ -127,13 +161,22 @@ export function applyLayerMode(
     if (mode === "composite") {
       mapValue = numProp(p, "composite_score");
     } else if (mode === "housing") {
-      mapValue = numProp(p, "rent_burden_pct");
-    } else {
-      const a = numProp(p, "uninsured_pct");
-      const b = numProp(p, "asthma_pct");
-      const c = numProp(p, "mental_health_pct");
+      const a = numProp(p, "cs_rent_burden_pct");
+      const b = numProp(p, "cs_overcrowding_pct");
+      const c = numProp(p, "cs_structural_vacancy_rate");
       const nums = [a, b, c].filter((x): x is number => x != null);
-      mapValue = nums.length ? nums.reduce((s, x) => s + x, 0) / nums.length : null;
+      mapValue = nums.length >= MIN_METRICS_FOR_BLEND
+        ? nums.reduce((s, x) => s + x, 0) / nums.length
+        : null;
+    } else {
+      // health
+      const a = numProp(p, "cs_uninsured_pct");
+      const b = numProp(p, "cs_asthma_pct");
+      const c = numProp(p, "cs_mental_health_pct");
+      const nums = [a, b, c].filter((x): x is number => x != null);
+      mapValue = nums.length >= MIN_METRICS_FOR_BLEND
+        ? nums.reduce((s, x) => s + x, 0) / nums.length
+        : null;
     }
     p.nh_map_value = mapValue;
   }

@@ -1,14 +1,11 @@
 /** Persist Explore map + search state so browser Back can restore after opening a tract. */
 
+import type { SearchResultRow } from "@/types";
+
 export const EXPLORE_MAP_SESSION_KEY = "nh-explore-map-session";
 
-export type PersistedSearchResult = {
-  geoid: string;
-  name: string | null;
-  state_fips: string;
-  county_name: string | null;
-  composite_score: number | null;
-};
+/** SearchResultRow is the canonical type for both API search results and persisted results. */
+export type { SearchResultRow };
 
 export type ExploreMapSessionV1 = {
   v: 1;
@@ -16,7 +13,7 @@ export type ExploreMapSessionV1 = {
   q: string;
   searchNarrowFips: string | null;
   stateFips: string | null;
-  searchResults: PersistedSearchResult[] | null;
+  searchResults: SearchResultRow[] | null;
   /** GEOIDs used to rebuild search GeoJSON via POST /map/tracts-by-geoids */
   searchGeoids: string[];
   searchInfo: string | null;
@@ -69,10 +66,10 @@ export function parseSearchGeoids(x: unknown): string[] {
 }
 
 /** Safe results: non-array → null; rows missing required fields are skipped. */
-export function parseSearchResults(x: unknown): PersistedSearchResult[] | null {
+export function parseSearchResults(x: unknown): SearchResultRow[] | null {
   if (x === null || x === undefined) return null;
   if (!Array.isArray(x)) return null;
-  const out: PersistedSearchResult[] = [];
+  const out: SearchResultRow[] = [];
   for (const row of x) {
     if (!isPlainRecord(row)) continue;
     const geoid = row.geoid;

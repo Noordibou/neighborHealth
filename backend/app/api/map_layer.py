@@ -53,7 +53,7 @@ async def tracts_geojson(
         """
         SELECT t.geoid,
                ST_AsGeoJSON(ST_SimplifyPreserveTopology(t.geometry, 0.001))::json AS g,
-               r.composite_score, t.name,
+               r.composite_score, r.component_scores, t.name,
                t.county_name, t.place_name, t.state_fips
         FROM tracts t
         LEFT JOIN risk_scores r ON r.geoid = t.geoid AND r.year = :year
@@ -77,7 +77,7 @@ async def tracts_geojson(
                 metrics_by_geoid[gid][mn] = float(val)
 
     features: list[dict[str, Any]] = []
-    for geoid, geom, score, name, county_name, place_name, state_fips in rows:
+    for geoid, geom, score, component_scores, name, county_name, place_name, state_fips in rows:
         gj = _as_geojson_geometry(geom)
         if gj is None:
             continue
@@ -90,6 +90,13 @@ async def tracts_geojson(
             "state_fips": state_fips,
         }
         props.update(metrics_by_geoid.get(geoid, {}))
+        # Normalized 0-100 component scores (cs_ prefix) — used by the Health and
+        # Housing map layers so they blend on a consistent national scale instead of
+        # averaging raw percentages on different scales.
+        cs = component_scores if isinstance(component_scores, dict) else None
+        for key in METRIC_KEYS:
+            v = cs.get(key) if cs else None
+            props[f"cs_{key}"] = float(v) if v is not None else None
         features.append({"type": "Feature", "geometry": gj, "properties": props})
     return {"type": "FeatureCollection", "features": features}
 
@@ -125,6 +132,7 @@ async def tracts_geojson_by_geoids(
             Tract.geoid,
             func.ST_AsGeoJSON(Tract.geometry).label("gj"),
             RiskScore.composite_score,
+            RiskScore.component_scores,
             Tract.name,
             Tract.county_name,
             Tract.place_name,
@@ -154,7 +162,7 @@ async def tracts_geojson_by_geoids(
                 metrics_by_geoid[gid][mn] = float(val)
 
     features: list[dict[str, Any]] = []
-    for geoid, gj_raw, score, name, county_name, place_name, state_fips in rows:
+    for geoid, gj_raw, score, component_scores, name, county_name, place_name, state_fips in rows:
         gj = _as_geojson_geometry(gj_raw)
         if gj is None:
             continue
@@ -167,5 +175,9 @@ async def tracts_geojson_by_geoids(
             "state_fips": state_fips,
         }
         props.update(metrics_by_geoid.get(geoid, {}))
+        cs = component_scores if isinstance(component_scores, dict) else None
+        for key in METRIC_KEYS:
+            v = cs.get(key) if cs else None
+            props[f"cs_{key}"] = float(v) if v is not None else None
         features.append({"type": "Feature", "geometry": gj, "properties": props})
     return {"type": "FeatureCollection", "features": features}

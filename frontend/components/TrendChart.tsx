@@ -1,7 +1,8 @@
 "use client";
 
-import { getTractTrend, type TractScorePoint } from "@/lib/api";
+import { getTractTrend } from "@/lib/api";
 import { useEffect, useState } from "react";
+import type { TractScorePoint, TrendChartProps } from "@/types";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { TooltipProps } from "recharts";
 
@@ -80,11 +81,6 @@ export function TrendDot(props: DotProps) {
 }
 
 // ─── Chart ──────────────────────────────────────────────────────────────────
-
-export type TrendChartProps = {
-  geoid: string;
-  has_trend: boolean;
-};
 
 export function TrendChart({ geoid, has_trend }: TrendChartProps) {
   const [loading, setLoading] = useState(has_trend);
