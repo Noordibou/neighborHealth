@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MapRef } from "react-map-gl/maplibre";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BrandWordmark } from "@/components/BrandMark";
 import { SiteFooter } from "@/components/SiteFooter";
 import { BivariateLegend } from "@/components/BivariateLegend";
@@ -30,6 +30,7 @@ import type {
 import { addToCompareTray, readCompareTray, removeFromCompareTray, writeCompareTray } from "@/lib/compareTray";
 import {
   EXPLORE_MAP_SESSION_KEY,
+  getInitialExploreBrowseStateFips,
   parseExploreMapSession,
   serializeExploreMapSession,
 } from "@/lib/exploreMapSession";
@@ -79,6 +80,8 @@ function ExploreInner() {
   const [rankedForTray, setRankedForTray] = useState<RankedTractRow[]>([]);
   const [layerMode, setLayerMode] = useState<ExploreLayerMode>("composite");
   const [compareTray, setCompareTray] = useState<string[]>([]);
+  /** Avoid persisting initial `[]` before layout hydration reads sessionStorage (was clearing the tray). */
+  const skipCompareTrayPersistRef = useRef(true);
   const [selectedGeoid, setSelectedGeoid] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<TractDetail | null>(null);
   const [selectedDetailErr, setSelectedDetailErr] = useState<string | null>(null);
@@ -107,6 +110,12 @@ function ExploreInner() {
   const exploreMapRef = useRef<MapRef | null>(null);
 
   const skipSessionHydrate = initialQ.length > 0;
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    const next = getInitialExploreBrowseStateFips(window.location.search, skipSessionHydrate);
+    if (next) setStateFips((prev) => (prev == null ? next : prev));
+  }, [skipSessionHydrate]);
 
   // clearSearchState clears only search UI state (no viewport — that's owned by useExploreUrlSync).
   const clearSearchState = useCallback(() => {
@@ -230,7 +239,7 @@ function ExploreInner() {
     };
   }, [skipSessionHydrate, initialQ, clearViewport, setQ, setSearchNarrowFips]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setCompareTray(readCompareTray());
   }, []);
 
@@ -272,6 +281,10 @@ function ExploreInner() {
   }, []);
 
   useEffect(() => {
+    if (skipCompareTrayPersistRef.current) {
+      skipCompareTrayPersistRef.current = false;
+      return;
+    }
     writeCompareTray(compareTray);
   }, [compareTray]);
 

@@ -1,6 +1,7 @@
 /** Persist Explore map + search state so browser Back can restore after opening a tract. */
 
 import type { SearchResultRow } from "@/types";
+import { parseExploreUrl } from "@/lib/exploreUrlParams";
 
 export const EXPLORE_MAP_SESSION_KEY = "nh-explore-map-session";
 
@@ -124,4 +125,23 @@ export function parseExploreMapSession(raw: string | null): ExploreMapSessionV1 
 
 export function serializeExploreMapSession(data: ExploreMapSessionV1): string {
   return JSON.stringify(data);
+}
+
+/**
+ * State FIPS for the first explore browse paint (client only).
+ * Avoids a frame at `stateFips === null` (US overview map) before effects hydrate from URL/session.
+ */
+export function getInitialExploreBrowseStateFips(search: string, skipSession: boolean): string | null {
+  if (typeof window === "undefined") return null;
+  const parsed = parseExploreUrl(search);
+  if (parsed.tract) return parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2);
+  if (!skipSession) {
+    const raw = window.sessionStorage.getItem(EXPLORE_MAP_SESSION_KEY);
+    const sess = parseExploreMapSession(raw);
+    if (sess?.stateFips) {
+      const s = String(sess.stateFips).trim();
+      if (s.length) return s.padStart(2, "0").slice(0, 2);
+    }
+  }
+  return parsed.stateFromUrl;
 }

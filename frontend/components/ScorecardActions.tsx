@@ -73,61 +73,62 @@ export function ScorecardActions({ geoid }: { geoid: string }) {
     window.setTimeout(() => setCompareHint(null), 3200);
   }
 
+  const btnBase =
+    "inline-flex w-full min-w-[10.5rem] items-center justify-center rounded-full px-4 py-2.5 text-center text-sm font-semibold sm:min-w-[11.5rem] lg:w-full lg:max-w-[13rem]";
+
   return (
-    <div className="flex flex-col items-stretch gap-3 sm:items-end">
-      <div className="flex flex-wrap justify-end gap-2">
-        <Link
-          href={`/compare?geoids=${encodeURIComponent(geoid)}`}
-          className="rounded-full border border-nh-brown/20 bg-white px-4 py-2.5 text-sm font-semibold text-nh-brown shadow-sm hover:bg-nh-cream"
-        >
-          + Compare
-        </Link>
-        <button
-          type="button"
-          onClick={onAddCompare}
-          className="rounded-full border border-nh-brown/20 bg-white px-4 py-2.5 text-sm font-semibold text-nh-brown hover:bg-nh-cream"
-        >
-          Add to tray
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (!navigator.clipboard?.writeText) {
-              setCopyMsg("Clipboard not available");
-              return;
-            }
-            void navigator.clipboard.writeText(window.location.href).then(
-              () => {
-                setCopyMsg("Link copied");
-                window.setTimeout(() => setCopyMsg(null), 2000);
-              },
-              () => setCopyMsg("Copy failed")
-            );
-          }}
-          className="rounded-full border border-nh-brown/20 bg-white px-4 py-2.5 text-sm font-semibold text-nh-brown hover:bg-nh-cream"
-        >
-          Share link
-        </button>
-        <button
-          type="button"
-          onClick={() => void onExportCsv()}
-          disabled={csvLoading}
-          className="rounded-full border border-nh-brown/20 bg-white px-4 py-2.5 text-sm font-semibold text-nh-brown shadow-sm hover:bg-nh-cream disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {csvLoading ? "Exporting…" : "Export CSV"}
-        </button>
-        <button
-          type="button"
-          onClick={onPdf}
-          className="rounded-full bg-nh-brown px-5 py-2.5 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
-        >
-          Report PDF ↓
-        </button>
-      </div>
-      {csvErr ? <p className="text-right text-sm text-red-600">{csvErr}</p> : null}
-      {msg && <p className="text-right text-sm text-red-600">{msg}</p>}
-      {copyMsg && <p className="text-right text-sm text-nh-brown-muted">{copyMsg}</p>}
-      {compareHint && <p className="text-right text-sm text-nh-brown-muted">{compareHint}</p>}
+    <div className="flex w-full flex-col gap-2 lg:max-w-[13rem] lg:items-end">
+      <Link
+        href={`/compare?geoids=${encodeURIComponent(geoid)}`}
+        className={`${btnBase} border border-nh-brown/20 bg-white text-nh-brown shadow-sm hover:bg-nh-cream`}
+      >
+        + Compare
+      </Link>
+      <button
+        type="button"
+        onClick={onAddCompare}
+        className={`${btnBase} border border-nh-brown/20 bg-white text-nh-brown hover:bg-nh-cream`}
+      >
+        Add to tray
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (!navigator.clipboard?.writeText) {
+            setCopyMsg("Clipboard not available");
+            return;
+          }
+          void navigator.clipboard.writeText(window.location.href).then(
+            () => {
+              setCopyMsg("Link copied");
+              window.setTimeout(() => setCopyMsg(null), 2000);
+            },
+            () => setCopyMsg("Copy failed")
+          );
+        }}
+        className={`${btnBase} border border-nh-brown/20 bg-white text-nh-brown hover:bg-nh-cream`}
+      >
+        Share link
+      </button>
+      <button
+        type="button"
+        onClick={() => void onExportCsv()}
+        disabled={csvLoading}
+        className={`${btnBase} border border-nh-brown/20 bg-white text-nh-brown shadow-sm hover:bg-nh-cream disabled:cursor-not-allowed disabled:opacity-60`}
+      >
+        {csvLoading ? "Exporting…" : "Export CSV"}
+      </button>
+      <button
+        type="button"
+        onClick={onPdf}
+        className={`${btnBase} bg-nh-brown px-5 text-nh-cream shadow-sm hover:bg-nh-brown/90`}
+      >
+        Report PDF ↓
+      </button>
+      {csvErr ? <p className="w-full text-right text-sm text-red-600 lg:max-w-[13rem]">{csvErr}</p> : null}
+      {msg ? <p className="w-full text-right text-sm text-red-600 lg:max-w-[13rem]">{msg}</p> : null}
+      {copyMsg ? <p className="w-full text-right text-sm text-nh-brown-muted lg:max-w-[13rem]">{copyMsg}</p> : null}
+      {compareHint ? <p className="w-full text-right text-sm text-nh-brown-muted lg:max-w-[13rem]">{compareHint}</p> : null}
     </div>
   );
 }

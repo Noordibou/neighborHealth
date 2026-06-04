@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MapRef } from "react-map-gl/maplibre";
+import { parseExploreUrl } from "@/lib/exploreUrlParams";
 import { isExploreBrowsePlaceholderViewport } from "@/lib/exploreMapPlaceholder";
 import type {
   ExploreLayerMode,
@@ -23,87 +24,7 @@ function paramsEqual(a: URLSearchParams, b: URLSearchParams): boolean {
   return true;
 }
 
-export function parseExploreUrl(search: string): {
-  tract: string | null;
-  stateFromUrl: string | null;
-  layer: ExploreLayerMode | null;
-  minRent: number | null;
-  minUninsured: number | null;
-  scoreMin: number | undefined;
-  popMin: number | undefined;
-  exclInst: boolean | undefined;
-  clinicDist: "" | "1" | "2" | "5" | "over5";
-  viewport: Viewport | null;
-} {
-  const p = new URLSearchParams(search);
-  const tractRaw = p.get("tract")?.trim();
-  const tract = tractRaw && /^\d{11}$/.test(tractRaw) ? tractRaw : null;
-  const stateRaw = p.get("state")?.trim();
-  const stateFromUrl =
-    stateRaw && /^\d{2}$/.test(stateRaw.padStart(2).slice(0, 2))
-      ? stateRaw.padStart(2).slice(0, 2)
-      : null;
-  const lr = p.get("layer")?.toLowerCase();
-  const layer: ExploreLayerMode | null =
-    lr === "housing" || lr === "health" || lr === "composite" || lr === "overlap"
-      ? (lr as ExploreLayerMode)
-      : null;
-  const rentN = Number(p.get("f_rent"));
-  const minRent =
-    Number.isFinite(rentN) && rentN >= 0 && rentN <= 100 ? Math.round(rentN) : null;
-  const uniN = Number(p.get("f_uninsured"));
-  const minUninsured =
-    Number.isFinite(uniN) && uniN >= 0 && uniN <= 50 ? Math.round(uniN) : null;
-  let scoreMin: number | undefined;
-  if (p.has("score_min")) {
-    const sc = Number(p.get("score_min"));
-    if (Number.isFinite(sc) && sc >= 0 && sc <= 100) scoreMin = Math.round(sc);
-  }
-  const POP_MIN_OPTS = new Set([0, 500, 1000, 2500, 5000]);
-  let popMin: number | undefined;
-  if (p.has("pop_min")) {
-    const pn = Number(p.get("pop_min"));
-    if (Number.isFinite(pn) && POP_MIN_OPTS.has(Math.round(pn))) popMin = Math.round(pn);
-  }
-  let exclInst: boolean | undefined;
-  if (p.has("excl_inst")) {
-    const raw = p.get("excl_inst")?.toLowerCase() ?? "";
-    exclInst = raw === "1" || raw === "true";
-  }
-  let clinicDist: "" | "1" | "2" | "5" | "over5" = "";
-  if (p.has("clinic_dist")) {
-    const cr = p.get("clinic_dist")?.trim().toLowerCase() ?? "";
-    if (cr === "1" || cr === "2" || cr === "5") clinicDist = cr as "1" | "2" | "5";
-    else if (cr === "over5") clinicDist = "over5";
-  }
-  const lat = Number(p.get("lat"));
-  const lng = Number(p.get("lng"));
-  const zoom = Number(p.get("zoom"));
-  const viewport =
-    Number.isFinite(lat) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    Number.isFinite(lng) &&
-    lng >= -180 &&
-    lng <= 180 &&
-    Number.isFinite(zoom) &&
-    zoom >= 0 &&
-    zoom <= 22
-      ? { lat, lng, zoom }
-      : null;
-  return {
-    tract,
-    stateFromUrl,
-    layer,
-    minRent,
-    minUninsured,
-    scoreMin,
-    popMin,
-    exclInst,
-    clinicDist,
-    viewport,
-  };
-}
+export { parseExploreUrl };
 
 function buildExploreUrlParams(opts: {
   qParam: string | null | undefined;
@@ -173,50 +94,13 @@ export function useExploreUrlSync({
   const viewportDebounceRef = useRef<number | null>(null);
   const pendingViewportRef = useRef<Viewport | null>(null);
   const hasHydratedRef = useRef(false);
+  /** Prevents URL clobber: passive "write URL" must run only after URL→state hydration (same sessionReady tick). */
+  const [urlSyncEnabled, setUrlSyncEnabled] = useState(false);
 
   const [viewportForUrl, setViewportForUrl] = useState<Viewport | null>(null);
   const [pendingUrlFly, setPendingUrlFly] = useState<Viewport | null>(null);
 
-  // Write current state to the URL on any relevant change.
-  useEffect(() => {
-    if (!sessionReady || typeof window === "undefined") return;
-    const qParam = sp.get("q");
-    const merged = buildExploreUrlParams({
-      qParam,
-      stateFips,
-      selectedGeoid,
-      layerMode,
-      appliedMinScore: applied.minScore,
-      appliedMinPopulation: applied.minPopulation,
-      appliedExcludeInstitutional: applied.excludeInstitutional,
-      appliedMinRent: applied.minRent,
-      appliedMinUninsured: applied.minUninsured,
-      appliedClinicDist: applied.clinicDist,
-      viewport: stateFips ? viewportForUrl : null,
-    });
-    const current = new URLSearchParams(window.location.search);
-    if (paramsEqual(merged, current)) return;
-    const qs = merged.toString();
-    const nextPath = qs ? `/explore?${qs}` : "/explore";
-    window.history.replaceState(window.history.state ?? null, "", nextPath);
-    router.replace(nextPath, { scroll: false });
-  }, [
-    sessionReady,
-    router,
-    sp,
-    stateFips,
-    selectedGeoid,
-    layerMode,
-    applied.minScore,
-    applied.minPopulation,
-    applied.excludeInstitutional,
-    applied.minRent,
-    applied.minUninsured,
-    applied.clinicDist,
-    viewportForUrl,
-  ]);
-
-  // Hydrate state from URL params exactly once when session is ready.
+  // Hydrate state from URL params exactly once when session is ready (before URL write effect runs meaningfully).
   useEffect(() => {
     if (!sessionReady || typeof window === "undefined") return;
     if (hasHydratedRef.current) return;
@@ -230,6 +114,8 @@ export function useExploreUrlSync({
       const sf = parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2);
       setStateFips(sf);
       setSelectedGeoid(parsed.tract);
+    } else if (parsed.stateFromUrl) {
+      setStateFips((prev) => (prev == null ? parsed.stateFromUrl : prev));
     }
     if (parsed.layer !== null) setLayerMode(parsed.layer);
     if (parsed.minRent !== null) {
@@ -260,7 +146,7 @@ export function useExploreUrlSync({
       const fromTract = parsed.tract
         ? parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2)
         : null;
-      const sfForViewport = fromTract ?? parsed.stateFromUrl ?? stateFips;
+      const sfForViewport = fromTract ?? parsed.stateFromUrl;
       if (sfForViewport && !isExploreBrowsePlaceholderViewport(sfForViewport, parsed.viewport)) {
         setViewportForUrl({
           lng: parsed.viewport.lng,
@@ -270,15 +156,59 @@ export function useExploreUrlSync({
         setPendingUrlFly(parsed.viewport);
       }
     }
+    const t = window.setTimeout(() => setUrlSyncEnabled(true), 0);
+    return () => {
+      window.clearTimeout(t);
+      hasHydratedRef.current = false;
+    };
   }, [
     sessionReady,
-    stateFips,
     clearSearchState,
     setStateFips,
     setSelectedGeoid,
     setLayerMode,
     setDraft,
     setApplied,
+  ]);
+
+  // Write current state to the URL on any relevant change (after initial URL hydration).
+  useEffect(() => {
+    if (!sessionReady || !urlSyncEnabled || typeof window === "undefined") return;
+    const qParam = sp.get("q");
+    const merged = buildExploreUrlParams({
+      qParam,
+      stateFips,
+      selectedGeoid,
+      layerMode,
+      appliedMinScore: applied.minScore,
+      appliedMinPopulation: applied.minPopulation,
+      appliedExcludeInstitutional: applied.excludeInstitutional,
+      appliedMinRent: applied.minRent,
+      appliedMinUninsured: applied.minUninsured,
+      appliedClinicDist: applied.clinicDist,
+      viewport: stateFips ? viewportForUrl : null,
+    });
+    const current = new URLSearchParams(window.location.search);
+    if (paramsEqual(merged, current)) return;
+    const qs = merged.toString();
+    const nextPath = qs ? `/explore?${qs}` : "/explore";
+    window.history.replaceState(window.history.state ?? null, "", nextPath);
+    router.replace(nextPath, { scroll: false });
+  }, [
+    sessionReady,
+    urlSyncEnabled,
+    router,
+    sp,
+    stateFips,
+    selectedGeoid,
+    layerMode,
+    applied.minScore,
+    applied.minPopulation,
+    applied.excludeInstitutional,
+    applied.minRent,
+    applied.minUninsured,
+    applied.clinicDist,
+    viewportForUrl,
   ]);
 
   // When pendingUrlFly is set, wait for the map to be ready then jump to it.

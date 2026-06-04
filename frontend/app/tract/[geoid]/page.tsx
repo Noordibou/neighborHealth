@@ -104,56 +104,54 @@ export default async function TractPage({ params }: Props) {
           ) : null}
         </div>
 
-        <div className="mt-6 flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 flex-1 flex-col gap-6 sm:flex-row sm:items-start">
-            <div className="flex shrink-0 flex-col items-center gap-2 sm:items-start">
-              {scoreRounded != null && (
-                <>
-                  <div
-                    className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
-                    aria-label={`Composite score ${scoreRounded} out of 100`}
-                  >
-                    <div className="text-center">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
-                      <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
-                      <p className="text-[9px] text-nh-brown-muted">out of 100</p>
-                    </div>
+        <div className="mt-6 grid gap-8 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-start lg:gap-x-8">
+          <div className="flex shrink-0 flex-col items-center gap-2 sm:items-start lg:items-start">
+            {scoreRounded != null && (
+              <>
+                <div
+                  className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
+                  aria-label={`Composite score ${scoreRounded} out of 100`}
+                >
+                  <div className="text-center">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
+                    <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
+                    <p className="text-[9px] text-nh-brown-muted">out of 100</p>
                   </div>
-                  <p className="text-center text-[11px] text-nh-brown-muted sm:text-left">
-                    Higher score = greater burden
-                  </p>
-                  {tract.risk_score?.rank != null && tract.risk_score.rank_total != null ? (
-                    <p className="text-center text-[11px] font-medium text-nh-brown-muted sm:text-left">
-                      Ranks #{tract.risk_score.rank} of {tract.risk_score.rank_total.toLocaleString()} nationally
-                    </p>
-                  ) : null}
-                  {tract.state_composite_score != null ? (
-                    <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left">
-                      State score {Math.round(tract.state_composite_score)}
-                    </p>
-                  ) : null}
-                </>
-              )}
-              {(tract.has_trend ?? false) ? (
-                <div className="mt-1 w-full max-w-[min(100%,20rem)] sm:max-w-xs">
-                  <TrendChartLazy geoid={tract.geoid} has_trend={true} />
                 </div>
-              ) : null}
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Neighborhood profile</p>
-              <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-nh-brown md:text-4xl">
-                {tract.name ?? `Tract ${tract.geoid}`}
-              </h1>
-              <p className="mt-2 text-lg text-nh-brown-muted">{place || `Tract ID ${tract.geoid}`}</p>
-              <p className="mt-4 max-w-2xl text-sm leading-relaxed text-nh-brown-muted">
-                {scoreRounded != null && tierLabel
-                  ? `This tract's composite score of ${scoreRounded} places it in the ${tierLabel} burden tier nationally.`
-                  : "Open compare from the map explorer to contrast nearby areas, or export a PDF for stakeholders."}
-              </p>
-            </div>
+                <p className="text-center text-[11px] text-nh-brown-muted sm:text-left">
+                  Higher score = greater burden
+                </p>
+                {tract.risk_score?.rank != null && tract.risk_score.rank_total != null ? (
+                  <p className="text-center text-[11px] font-medium text-nh-brown-muted sm:text-left">
+                    Ranks #{tract.risk_score.rank} of {tract.risk_score.rank_total.toLocaleString()} nationally
+                  </p>
+                ) : null}
+                {tract.state_composite_score != null ? (
+                  <p className="max-w-[11rem] text-center text-xs font-medium leading-snug text-nh-brown-muted sm:text-left">
+                    State score {Math.round(tract.state_composite_score)}
+                  </p>
+                ) : null}
+              </>
+            )}
+            {(tract.has_trend ?? false) ? (
+              <div className="mt-1 w-full max-w-[min(100%,20rem)] sm:max-w-xs">
+                <TrendChartLazy geoid={tract.geoid} has_trend={true} />
+              </div>
+            ) : null}
           </div>
-          <div className="shrink-0 lg:pt-2">
+          <div className="min-w-0 lg:pt-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Neighborhood profile</p>
+            <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-nh-brown md:text-4xl">
+              {tract.name ?? `Tract ${tract.geoid}`}
+            </h1>
+            <p className="mt-2 text-lg text-nh-brown-muted">{place || `Tract ID ${tract.geoid}`}</p>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-nh-brown-muted">
+              {scoreRounded != null && tierLabel
+                ? `This tract's composite score of ${scoreRounded} places it in the ${tierLabel} burden tier nationally.`
+                : "Open compare from the map explorer to contrast nearby areas, or export a PDF for stakeholders."}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch lg:items-end">
             <ScorecardActions geoid={tract.geoid} />
           </div>
         </div>

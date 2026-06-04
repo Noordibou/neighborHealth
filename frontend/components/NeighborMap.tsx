@@ -394,10 +394,27 @@ function NeighborMapInner({
     setBasemapLabelBeforeId(DEFAULT_BASEMAP_LABEL_BEFORE_ID);
   }, [styleUrl]);
 
-  const onMapLoad = useCallback((e: { target: MapLibreMap }) => {
-    const anchor = firstSymbolLayerIdFromStyle(e.target);
-    if (anchor) setBasemapLabelBeforeId(anchor);
-  }, []);
+  const onMapLoad = useCallback(
+    (e: { target: MapLibreMap }) => {
+      const anchor = firstSymbolLayerIdFromStyle(e.target);
+      if (anchor) setBasemapLabelBeforeId(anchor);
+      // Some basemap styles default to globe; keep explore on flat mercator + no world copies.
+      if (variant === "explore") {
+        try {
+          const m = e.target as MapLibreMap & { setProjection?: (p: { type: string }) => void };
+          m.setProjection?.({ type: "mercator" });
+        } catch {
+          /* ignore */
+        }
+        try {
+          e.target.setRenderWorldCopies(false);
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [variant]
+  );
 
   const [colorBy, setColorBy] = useState<string>("composite_score");
   const effectiveKey = fillProperty ?? colorBy;
@@ -642,7 +659,7 @@ function NeighborMapInner({
         map.resize();
         map.fitBounds(bounds, {
           ...fitOpts,
-          duration: 1100,
+          duration: isBrowseExploreFit ? 450 : 1100,
         });
       } catch {
         /* ignore fit errors for degenerate bounds */
@@ -876,6 +893,8 @@ function NeighborMapInner({
       key={fitBoundsToData ? "explore-search" : `explore-${stateFips ?? "us"}`}
       style={{ width: "100%", height: "100%" }}
       initialViewState={{ longitude: center[0], latitude: center[1], zoom }}
+      projection={variant === "explore" ? "mercator" : undefined}
+      renderWorldCopies={variant === "explore" ? false : undefined}
       mapStyle={styleUrl}
       interactiveLayerIds={interactiveLayerIds}
       onClick={onClick}
