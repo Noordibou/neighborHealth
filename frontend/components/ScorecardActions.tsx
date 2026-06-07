@@ -74,10 +74,10 @@ export function ScorecardActions({ geoid }: { geoid: string }) {
   }
 
   const btnBase =
-    "inline-flex w-full min-w-[10.5rem] items-center justify-center rounded-full px-4 py-2.5 text-center text-sm font-semibold sm:min-w-[11.5rem] lg:w-full lg:max-w-[13rem]";
+    "inline-flex w-full items-center justify-center rounded-full px-4 py-3 text-center text-sm font-semibold min-h-[44px]";
 
   return (
-    <div className="flex w-full flex-col gap-2 lg:max-w-[13rem] lg:items-end">
+    <div className="grid w-full grid-cols-2 gap-2 md:flex md:w-auto md:flex-col md:items-end md:max-w-[13rem]">
       <Link
         href={`/compare?geoids=${encodeURIComponent(geoid)}`}
         className={`${btnBase} border border-nh-brown/20 bg-white text-nh-brown shadow-sm hover:bg-nh-cream`}
@@ -125,10 +125,10 @@ export function ScorecardActions({ geoid }: { geoid: string }) {
       >
         Report PDF ↓
       </button>
-      {csvErr ? <p className="w-full text-right text-sm text-red-600 lg:max-w-[13rem]">{csvErr}</p> : null}
-      {msg ? <p className="w-full text-right text-sm text-red-600 lg:max-w-[13rem]">{msg}</p> : null}
-      {copyMsg ? <p className="w-full text-right text-sm text-nh-brown-muted lg:max-w-[13rem]">{copyMsg}</p> : null}
-      {compareHint ? <p className="w-full text-right text-sm text-nh-brown-muted lg:max-w-[13rem]">{compareHint}</p> : null}
+      {csvErr ? <p className="col-span-2 w-full text-right text-sm text-red-600 md:col-span-1 md:max-w-[13rem]">{csvErr}</p> : null}
+      {msg ? <p className="col-span-2 w-full text-right text-sm text-red-600 md:col-span-1 md:max-w-[13rem]">{msg}</p> : null}
+      {copyMsg ? <p className="col-span-2 w-full text-right text-sm text-nh-brown-muted md:col-span-1 md:max-w-[13rem]">{copyMsg}</p> : null}
+      {compareHint ? <p className="col-span-2 w-full text-right text-sm text-nh-brown-muted md:col-span-1 md:max-w-[13rem]">{compareHint}</p> : null}
     </div>
   );
 }

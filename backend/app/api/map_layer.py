@@ -36,6 +36,32 @@ def _as_geojson_geometry(raw: Any) -> dict[str, Any] | None:
             return None
     return None
 
+
+def _component_scores_as_dict(raw: Any) -> dict[str, Any] | None:
+    """JSONB from raw SQL may arrive as dict, str, or bytes depending on driver/casting."""
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, memoryview):
+        raw = raw.tobytes()
+    if isinstance(raw, bytes):
+        try:
+            raw = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        try:
+            out = json.loads(s)
+            return out if isinstance(out, dict) else None
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
 router = APIRouter(prefix="/api/map", tags=["map"])
 
 
@@ -93,7 +119,7 @@ async def tracts_geojson(
         # Normalized 0-100 component scores (cs_ prefix) — used by the Health and
         # Housing map layers so they blend on a consistent national scale instead of
         # averaging raw percentages on different scales.
-        cs = component_scores if isinstance(component_scores, dict) else None
+        cs = _component_scores_as_dict(component_scores)
         for key in METRIC_KEYS:
             v = cs.get(key) if cs else None
             props[f"cs_{key}"] = float(v) if v is not None else None
@@ -175,7 +201,7 @@ async def tracts_geojson_by_geoids(
             "state_fips": state_fips,
         }
         props.update(metrics_by_geoid.get(geoid, {}))
-        cs = component_scores if isinstance(component_scores, dict) else None
+        cs = _component_scores_as_dict(component_scores)
         for key in METRIC_KEYS:
             v = cs.get(key) if cs else None
             props[f"cs_{key}"] = float(v) if v is not None else None

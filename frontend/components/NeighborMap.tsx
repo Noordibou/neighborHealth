@@ -9,6 +9,7 @@ import type { Map as MapLibreMap, MapLayerMouseEvent } from "maplibre-gl";
 import { BIVARIATE_COLORS } from "@/lib/mapGeojson";
 import { getExploreBrowsePlaceholderView, getExploreUsOverviewView } from "@/lib/exploreMapPlaceholder";
 import { STATE_FIPS_TO_POSTAL } from "@/lib/geo";
+import type { ExploreLayerMode } from "@/types";
 
 // MapLibre GL 4.x requires an explicit worker URL in bundled/Next.js environments.
 // Without this, new Worker("") fails silently and glyphs (required for text labels)
@@ -74,16 +75,9 @@ function numProp(p: Record<string, unknown>, k: string): number | null {
 
 /**
  * Fill color for tracts with no value for the active choropleth metric (distinct from the teal value ramp).
- * Referenced in the map legend and hover copy so users learn this convention.
+ * Referenced in the map legend.
  */
 const NO_DATA_CHOROPLETH_FILL = "#f5e6d8";
-
-function hasChoroplethValueForProperty(p: Record<string, unknown> | undefined, key: string): boolean {
-  if (!p || !Object.prototype.hasOwnProperty.call(p, key)) return false;
-  const v = p[key];
-  if (v === null || v === undefined) return false;
-  return true;
-}
 
 type HoverInfo = {
   geoid: string;
@@ -95,14 +89,9 @@ type HoverInfo = {
   rent_burden_pct: number | null;
   uninsured_pct: number | null;
   asthma_pct: number | null;
-  /** True when the tract has no value for the metric currently driving map fill color. */
-  missingActiveChoropleth: boolean;
 };
 
-function propsToHover(
-  p: Record<string, unknown> | null | undefined,
-  choroplethKey: string
-): HoverInfo | null {
+function propsToHover(p: Record<string, unknown> | null | undefined): HoverInfo | null {
   if (!p || typeof p.geoid !== "string") return null;
   const stateFips =
     strProp(p, "state_fips") ?? (p.geoid.length >= 2 ? p.geoid.slice(0, 2) : null);
@@ -116,7 +105,6 @@ function propsToHover(
     rent_burden_pct: numProp(p, "rent_burden_pct"),
     uninsured_pct: numProp(p, "uninsured_pct"),
     asthma_pct: numProp(p, "asthma_pct"),
-    missingActiveChoropleth: !hasChoroplethValueForProperty(p, choroplethKey),
   };
 }
 
@@ -158,6 +146,43 @@ function hoverHasShownMetrics(h: HoverInfo): boolean {
   );
 }
 
+/** Hover card size used to clamp position inside the map shell. */
+const HOVER_TIP_W = 272;
+const HOVER_TIP_H = 220;
+
+function clampHoverTip(
+  shellW: number,
+  shellH: number,
+  x: number,
+  y: number,
+  edgePad = 8,
+  cursorOff = 14
+): { left: number; top: number } {
+  let left = x + cursorOff;
+  let top = y + cursorOff;
+  if (left + HOVER_TIP_W > shellW - edgePad) left = Math.max(edgePad, shellW - HOVER_TIP_W - edgePad);
+  if (top + HOVER_TIP_H > shellH - edgePad) top = Math.max(edgePad, shellH - HOVER_TIP_H - edgePad);
+  if (left < edgePad) left = edgePad;
+  if (top < edgePad) top = edgePad;
+  return { left, top };
+}
+
+function pointerOffsetInMapShell(
+  e: MapLayerMouseEvent,
+  shell: HTMLElement
+): { x: number; y: number } | null {
+  const rect = shell.getBoundingClientRect();
+  const orig = (e as unknown as { originalEvent?: unknown }).originalEvent;
+  if (orig instanceof MouseEvent) {
+    return { x: orig.clientX - rect.left, y: orig.clientY - rect.top };
+  }
+  const pt = (e as unknown as { point?: { x: number; y: number } }).point;
+  if (pt && Number.isFinite(pt.x) && Number.isFinite(pt.y)) {
+    return { x: pt.x, y: pt.y };
+  }
+  return null;
+}
+
 type Props = {
   /** When null, map shows the continental US overview with no tract layer. */
   stateFips: string | null;
@@ -175,6 +200,10 @@ type Props = {
   fillProperty?: string | null;
   /** Legend / hover label for `fillProperty` mode. */
   fillLabel?: string;
+  /** Extra legend copy (e.g. how Housing/Health blends are computed); shown in the info panel. */
+  fillLegendDetail?: string | null;
+  /** Explore layer tab — drives notes in the legend info panel. */
+  fillLegendKind?: ExploreLayerMode | null;
   /**
    * When "bivariate", tract fill uses `nh_bivariate_class` + `BIVARIATE_COLORS` (numeric ramp skipped).
    * Does not change `effectiveKey` / hover metrics — only map fill paint.
@@ -189,7 +218,7 @@ type Props = {
   showMetricControl?: boolean;
   /** Strong outline for the active tract (GEOID string). */
   selectedGeoid?: string | null;
-  /** Tailwind bottom position for the hover card (explore mode; use when a bottom bar covers the map). */
+  /** @deprecated Hover card follows the cursor; this prop is ignored. */
   hoverLegendBottomClassName?: string;
   /** Explore: Composite / Housing / Health tabs (top-left). */
   exploreLayerTabs?: ReactNode;
@@ -249,6 +278,34 @@ function maxZoomForSearchExtent(lonSpan: number, latSpan: number): number {
   if (s > 0.06) return 13;
   if (s > 0.025) return 14;
   return 15;
+}
+
+/**
+ * Choropleth domain for explore `nh_map_value` (national 0–100 index).
+ * Stretches the ramp across the min/max of tracts on the current map (plus padding,
+ * with a minimum span) so nearby index values read as different shades. Bounds are
+ * always clamped to [0, 100] so the scale never drifts outside the cohort index.
+ */
+function exploreNhMapValueDomain(range: { min: number; max: number } | null): { lo: number; hi: number } {
+  const MIN_SPAN = 28;
+  if (!range) {
+    return { lo: 0, hi: 100 };
+  }
+  let { min, max } = range;
+  let span = max - min;
+  if (!Number.isFinite(span) || span < 1e-6) {
+    const mid = (min + max) / 2;
+    const half = Math.min(MIN_SPAN / 2, 50);
+    return clampPctDomain(mid - half, mid + half);
+  }
+  if (span < MIN_SPAN) {
+    const padMid = (MIN_SPAN - span) / 2;
+    min -= padMid;
+    max += padMid;
+    span = MIN_SPAN;
+  }
+  const pad = Math.max(span * 0.12, 1);
+  return clampPctDomain(min - pad, max + pad);
 }
 
 /** Min/max of a numeric GeoJSON property (skips null / missing / non-finite). */
@@ -352,6 +409,24 @@ function buildChoroplethColorStops(lo: number, hi: number): (number | string)[] 
   return out;
 }
 
+function InfoCircleIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.75" />
+      <path d="M12 16v-5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <circle cx="12" cy="8" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
 function NeighborMapInner({
   stateFips,
   data,
@@ -362,17 +437,21 @@ function NeighborMapInner({
   zoomToResultsKey = 0,
   fillProperty = null,
   fillLabel = "Priority index",
+  fillLegendDetail = null,
+  fillLegendKind = null,
   choroplethStyle = "ramp",
   suppressBuiltInBivariateLegend = false,
   showMetricControl = true,
   selectedGeoid = null,
-  hoverLegendBottomClassName,
+
   exploreLayerTabs = null,
   statePickerGeoJSON = null,
   onSelectStateFips,
   exploreMapRef,
   onExploreMapMoveEnd,
 }: Props) {
+  const mapShellRef = useRef<HTMLDivElement>(null);
+  const [hoverCard, setHoverCard] = useState<{ info: HoverInfo; left: number; top: number } | null>(null);
   const mapRef = useRef<MapRef>(null);
 
   if (exploreMapRef) {
@@ -385,6 +464,7 @@ function NeighborMapInner({
       exploreMapRef.current = null;
     };
   }, [exploreMapRef]);
+
   const styleUrl = mapStyle ?? process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? DEFAULT_MAP_STYLE;
 
   /** Insert choropleth before this basemap layer so roads/shields/place names stay on top. */
@@ -418,7 +498,6 @@ function NeighborMapInner({
 
   const [colorBy, setColorBy] = useState<string>("composite_score");
   const effectiveKey = fillProperty ?? colorBy;
-  const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const hoveredGeoidRef = useRef<string | null>(null);
   const hasTracts = Boolean(data?.features?.length);
   const showStatePicker = Boolean(
@@ -439,12 +518,30 @@ function NeighborMapInner({
   }, [data, effectiveKey, choroplethStyle]);
 
   const colorDomain = useMemo(() => {
-    // nh_map_value carries composite scores or normalized component-score blends,
-    // all on the same 0–100 national scale.  Use a fixed domain so the same shade
-    // represents the same burden level regardless of which state is loaded.
-    if (effectiveKey === "nh_map_value") return { lo: 0, hi: 100 };
+    if (effectiveKey === "nh_map_value") {
+      return exploreNhMapValueDomain(choroplethRange);
+    }
     return choroplethDomain(choroplethRange, effectiveKey);
   }, [choroplethRange, effectiveKey]);
+
+  const [legendPanelOpen, setLegendPanelOpen] = useState<"off" | "ramp" | "biv">("off");
+  const rampLegendShellRef = useRef<HTMLDivElement>(null);
+  const bivLegendShellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setLegendPanelOpen("off");
+  }, [fillLegendKind, choroplethStyle, fillLabel]);
+
+  useEffect(() => {
+    if (legendPanelOpen === "off") return;
+    const shell = legendPanelOpen === "ramp" ? rampLegendShellRef.current : bivLegendShellRef.current;
+    const onDoc = (ev: MouseEvent) => {
+      if (shell?.contains(ev.target as Node)) return;
+      setLegendPanelOpen("off");
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [legendPanelOpen]);
 
   const colorStops = useMemo(
     () => buildChoroplethColorStops(colorDomain.lo, colorDomain.hi),
@@ -577,21 +674,31 @@ function NeighborMapInner({
             /* ignore */
           }
         }
-        setHoverInfo(propsToHover(props, fillChoroplethKey));
+        const hoverInfo = propsToHover(props);
+        if (!hoverInfo) {
+          setHoverCard(null);
+        } else {
+          const shell = mapShellRef.current ?? map.getContainer();
+          const pt = pointerOffsetInMapShell(e, shell);
+          const pos = pt
+            ? clampHoverTip(shell.clientWidth, shell.clientHeight, pt.x, pt.y)
+            : { left: 16, top: 16 };
+          setHoverCard({ info: hoverInfo, ...pos });
+        }
       } else {
         canvas.style.cursor = "";
         clearHoverFeatureState(map);
-        setHoverInfo(null);
+        setHoverCard(null);
       }
     },
-    [hasTracts, showStatePicker, clearHoverFeatureState, fillChoroplethKey]
+    [hasTracts, showStatePicker, clearHoverFeatureState]
   );
 
   const onMouseLeave = useCallback(
     (e: { target: MapLibreMap }) => {
       e.target.getCanvas().style.cursor = "";
       clearHoverFeatureState(e.target);
-      setHoverInfo(null);
+      setHoverCard(null);
     },
     [clearHoverFeatureState]
   );
@@ -711,44 +818,28 @@ function NeighborMapInner({
 
   useEffect(() => {
     hoveredGeoidRef.current = null;
-    setHoverInfo(null);
+    setHoverCard(null);
   }, [data, boundsKey, choroplethStyle]);
 
   const fmtPct = (v: number | null, digits = 0) =>
     v != null && Number.isFinite(v) ? `${digits ? v.toFixed(digits) : Math.round(v)}%` : "—";
 
-  const hoverBottom =
-    variant === "explore"
-      ? hoverLegendBottomClassName ?? "bottom-5 sm:bottom-4"
-      : "bottom-4";
-
   const hoverLegend =
-    hoverInfo && hasTracts ? (() => {
-      const { headline, subline } = formatHoverLocation(hoverInfo);
-      const hasMetrics = hoverHasShownMetrics(hoverInfo);
+    hoverCard && hasTracts ? (() => {
+      const { info } = hoverCard;
+      const { headline, subline } = formatHoverLocation(info);
+      const hasMetrics = hoverHasShownMetrics(info);
       return (
         <div
-          className={`pointer-events-none absolute left-1/2 z-10 w-[min(94vw,26rem)] max-w-[calc(100%-1rem)] -translate-x-1/2 ${hoverBottom}`}
+          className="pointer-events-none absolute z-20 w-[17rem] max-w-[calc(100%-1rem)]"
+          style={{ left: hoverCard.left, top: hoverCard.top }}
         >
-          <div className="max-h-[min(40dvh,20rem)] overflow-y-auto overscroll-contain rounded-xl border border-nh-brown/40 bg-nh-brown/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm sm:max-h-[min(45dvh,22rem)]">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-100/90">Area under cursor</p>
-            <p className="mt-1 line-clamp-2 text-sm font-semibold leading-snug">{headline}</p>
+          <div className="max-h-[13.75rem] overflow-y-auto overscroll-contain rounded-xl border border-nh-brown/40 bg-nh-brown/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm">
+            <p className="mt-1 break-words text-sm font-semibold leading-snug">{headline}</p>
             {subline ? (
-              <p className="mt-0.5 line-clamp-3 text-xs leading-snug text-slate-300">{subline}</p>
+              <p className="mt-0.5 break-words text-xs leading-snug text-slate-300">{subline}</p>
             ) : null}
-            <p className="mt-1 font-mono text-[11px] text-slate-400">Tract ID {hoverInfo.geoid}</p>
-            {hoverInfo.missingActiveChoropleth ? (
-              <p className="mt-2 rounded-md border border-orange-400/55 bg-orange-900/75 px-2 py-1.5 text-[11px] leading-snug text-orange-100">
-                <span className="font-semibold text-orange-200">Map fill:</span> light{" "}
-                <strong className="text-orange-200">orange</strong> means no value for{" "}
-                <strong>
-                  {choroplethStyle === "bivariate"
-                    ? "Bivariate class (housing stress × health burden)"
-                    : METRICS.find((m) => m.id === effectiveKey)?.label ?? fillLabel}
-                </strong>{" "}
-                on this tract (see legend on the map).
-              </p>
-            ) : null}
+            <p className="mt-1 font-mono text-[11px] text-slate-400">Tract ID {info.geoid}</p>
             {!hasMetrics ? (
               <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-950/40 px-2 py-1.5 text-[11px] leading-snug text-amber-100/95">
                 No risk score or indicators loaded for this tract (boundary only, not ingested, or a different data
@@ -758,14 +849,14 @@ function NeighborMapInner({
               <dl className="mt-2 grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-3 gap-y-1 border-t border-white/10 pt-2 text-xs">
                 <dt className="text-slate-400">Composite risk</dt>
                 <dd className="font-medium text-nh-cream">
-                  {hoverInfo.composite_score != null ? Math.round(hoverInfo.composite_score) : "—"}
+                  {info.composite_score != null ? Math.round(info.composite_score) : "—"}
                 </dd>
                 <dt className="text-slate-400">Rent burden</dt>
-                <dd>{fmtPct(hoverInfo.rent_burden_pct)}</dd>
+                <dd>{fmtPct(info.rent_burden_pct)}</dd>
                 <dt className="text-slate-400">Uninsured</dt>
-                <dd>{fmtPct(hoverInfo.uninsured_pct, 1)}</dd>
+                <dd>{fmtPct(info.uninsured_pct, 1)}</dd>
                 <dt className="text-slate-400">Asthma</dt>
-                <dd>{fmtPct(hoverInfo.asthma_pct, 1)}</dd>
+                <dd>{fmtPct(info.asthma_pct, 1)}</dd>
               </dl>
             )}
           </div>
@@ -795,22 +886,85 @@ function NeighborMapInner({
     ) : null;
 
   const legendMetricLabel = fillProperty ? fillLabel : METRICS.find((m) => m.id === effectiveKey)?.label ?? "Choropleth";
+  const useCompactExploreLegend = Boolean(fillProperty);
   const legendScaleHint =
     effectiveKey === "nh_map_value"
-      ? "Scale: 0–100 normalized across the national cohort. Same shade = same burden level in every state."
+      ? choroplethRange != null
+        ? `Colors use ~${Math.round(colorDomain.lo)}–${Math.round(colorDomain.hi)} on tracts here for contrast. Values are still a 0–100 national index (darker = higher on this view).`
+        : "No numeric index on tracts in this view."
       : choroplethRange != null
         ? `Scale spans ~${Math.round(colorDomain.lo)}–${Math.round(colorDomain.hi)} on tracts shown here so similar values read as different shades.`
         : "No numeric values found for this metric on the current layer.";
 
+  const nhObservedRange = effectiveKey === "nh_map_value" && choroplethRange != null ? choroplethRange : null;
+  const legendBoundLo = nhObservedRange ? Math.round(nhObservedRange.min) : Math.round(colorDomain.lo);
+  const legendBoundHi = nhObservedRange ? Math.round(nhObservedRange.max) : Math.round(colorDomain.hi);
+  const legendBoundMid = Math.round((legendBoundLo + legendBoundHi) / 2);
+  const rampLoDisp = Math.round(colorDomain.lo);
+  const rampHiDisp = Math.round(colorDomain.hi);
+
   const bivariateLegend =
     choroplethStyle === "bivariate" ? (
-      <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">{fillLabel}</p>
-        <p className="mt-1 max-w-[12rem] text-[9px] leading-snug text-nh-brown-muted">
-          3×3 matrix: housing stress (columns 1–3) × health burden (rows 1–3). Tertiles within the map.
-        </p>
+      <div
+        ref={useCompactExploreLegend ? bivLegendShellRef : undefined}
+        className={
+          useCompactExploreLegend
+            ? "relative flex w-52 shrink-0 flex-col overflow-visible rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm"
+            : "rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm"
+        }
+      >
+        <div className="flex shrink-0 items-start justify-between gap-1">
+          <p className="min-w-0 flex-1 text-[10px] font-semibold uppercase leading-snug tracking-wide text-nh-brown-muted break-words">
+            {fillLabel}
+          </p>
+          {useCompactExploreLegend ? (
+            <button
+              type="button"
+              className="pointer-events-auto -mr-0.5 -mt-0.5 shrink-0 rounded p-0.5 text-nh-brown-muted hover:bg-nh-brown/10 hover:text-nh-brown"
+              aria-label="Overlap layer details"
+              aria-expanded={legendPanelOpen === "biv"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setLegendPanelOpen((p) => (p === "biv" ? "off" : "biv"));
+              }}
+            >
+              <InfoCircleIcon />
+            </button>
+          ) : null}
+        </div>
+        {useCompactExploreLegend && legendPanelOpen === "biv" ? (
+          <div className="pointer-events-auto absolute right-1 top-8 z-30 max-h-56 w-[min(17.5rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-nh-brown/20 bg-white p-3 text-left text-[10px] leading-snug text-nh-brown shadow-xl">
+            <p className="font-semibold text-nh-brown">Overlap (bivariate)</p>
+            <p className="mt-2">
+              Housing stress and health burden use nationally normalized 0–100 component-score blends. Each axis is
+              the average of scores where at least two of three metrics are present. Tertiles (classes 1–3) are computed
+              only among tracts on this map.
+            </p>
+            <p className="mt-2 border-t border-nh-brown/10 pt-2 text-nh-brown-muted">
+              Matrix: columns = housing stress (low → high), rows = health burden (low at bottom, high at top). The
+              3×3 grid matches the map colors.
+            </p>
+          </div>
+        ) : null}
         <div
-          className="mt-2 grid w-[4.5rem] grid-cols-3 gap-0.5 rounded border border-nh-brown/10 p-0.5"
+          className={
+            useCompactExploreLegend
+              ? "mt-1 shrink-0 text-[9px] leading-snug text-nh-brown-muted break-words"
+              : "mt-1 max-w-[12rem] text-[9px] leading-snug text-nh-brown-muted break-words"
+          }
+        >
+          {useCompactExploreLegend ? (
+            <p>3×3 housing × health classes. Use the info (i) button for how blends and tertiles work.</p>
+          ) : (
+            <p>
+              Housing stress and health burden use nationally normalized 0–100 component-score blends (each axis
+              averages scores where at least two of three housing or health metrics are present). Classes are tertiles
+              among tracts on this map only.
+            </p>
+          )}
+        </div>
+        <div
+          className="mt-2 grid w-[4.5rem] shrink-0 grid-cols-3 gap-0.5 self-start rounded border border-nh-brown/10 p-0.5"
           aria-label="Bivariate color key"
         >
           {(["3-1", "3-2", "3-3", "2-1", "2-2", "2-3", "1-1", "1-2", "1-3"] as const).map((cell) => (
@@ -822,44 +976,140 @@ function NeighborMapInner({
             />
           ))}
         </div>
-        <div className="mt-2 flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
+        <div className="mt-2 flex shrink-0 items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
           <span
             className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border border-orange-400/70 shadow-sm"
             style={{ backgroundColor: NO_DATA_CHOROPLETH_FILL }}
             aria-hidden
           />
-          <p className="mt-0.5 text-[9px] text-orange-800">No bivariate class (missing blend)</p>
+          <p className="mt-0.5 text-[9px] leading-snug text-orange-800 break-words">No bivariate class (missing blend)</p>
         </div>
       </div>
     ) : null;
 
-  const legend = (
-    <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">{legendMetricLabel}</p>
+  const legend = useCompactExploreLegend ? (
+    <div
+      ref={rampLegendShellRef}
+      className="relative flex w-52 shrink-0 flex-col overflow-visible rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm"
+    >
+      <div className="flex shrink-0 items-start justify-between gap-1">
+        <p className="min-w-0 flex-1 text-[10px] font-semibold uppercase leading-snug tracking-wide text-nh-brown-muted break-words">
+          {legendMetricLabel}
+        </p>
+        <button
+          type="button"
+          className="pointer-events-auto -mr-0.5 -mt-0.5 shrink-0 rounded p-0.5 text-nh-brown-muted hover:bg-nh-brown/10 hover:text-nh-brown"
+          aria-label="Layer legend details"
+          aria-expanded={legendPanelOpen === "ramp"}
+          onClick={(e) => {
+            e.stopPropagation();
+            setLegendPanelOpen((p) => (p === "ramp" ? "off" : "ramp"));
+          }}
+        >
+          <InfoCircleIcon />
+        </button>
+      </div>
+      {legendPanelOpen === "ramp" ? (
+        <div className="pointer-events-auto absolute right-1 top-8 z-30 max-h-56 w-[min(17.5rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-nh-brown/20 bg-white p-3 text-left text-[10px] leading-snug text-nh-brown shadow-xl">
+          <p className="font-semibold text-nh-brown">Layer details</p>
+          <p className="mt-2 text-nh-brown-muted">{legendScaleHint}</p>
+          {fillLegendDetail ? <p className="mt-2 border-t border-nh-brown/10 pt-2">{fillLegendDetail}</p> : null}
+          <p className="mt-2 border-t border-nh-brown/10 pt-2">
+            The <strong>↓</strong> and <strong>↑</strong> numbers under the color bar are the{" "}
+            <strong>minimum and maximum map index</strong> among tracts in this view—the same value used to paint each
+            tract (not raw ACS percentages).
+          </p>
+          <p className="mt-2">
+            Shading still interpolates across <strong>{rampLoDisp}</strong>–<strong>{rampHiDisp}</strong> so similar
+            indexes look more distinct (contrast ramp). Tract popovers and profiles show raw % where applicable.
+          </p>
+          {fillLegendKind === "housing" || fillLegendKind === "health" ? (
+            <p className="mt-2 text-nh-brown-muted">
+              Example: rent burden or uninsured rate on a tract can be much higher than the housing/health{" "}
+              <em>index</em> shown here, because the index averages three different nationally normalized 0–100 scores,
+              not one raw percentage.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div
-        className="mt-2 h-3 w-36 rounded-full shadow-inner ring-1 ring-slate-200/80"
+        className="mt-2 h-3 w-full shrink-0 rounded-full shadow-inner ring-1 ring-slate-200/80"
         style={{
           background: `linear-gradient(to right, ${CHORO_COLORS.join(", ")})`,
         }}
       />
-      <div className="mt-1 flex justify-between text-[10px] text-nh-brown-muted">
-        <span>↓ {(effectiveKey === "nh_map_value" || choroplethRange != null) ? formatLegendBound(colorDomain.lo, effectiveKey) : "Lower"}</span>
-        {effectiveKey === "nh_map_value" ? (
-          <span className="text-nh-brown-muted/50">50</span>
+      <div className="mt-1 flex shrink-0 items-start justify-between gap-1 text-[10px] text-nh-brown-muted">
+        <span className="shrink-0">
+          ↓ {effectiveKey === "nh_map_value" || choroplethRange != null ? formatLegendBound(legendBoundLo, effectiveKey) : "Lower"}
+        </span>
+        {effectiveKey === "nh_map_value" && choroplethRange != null ? (
+          <span className="flex min-w-0 flex-1 flex-col items-center text-center leading-tight">
+            <span className="font-medium text-nh-brown/80">{legendBoundMid}</span>
+            <span className="text-[9px] text-nh-brown-muted/90">Mid (tracts here)</span>
+          </span>
         ) : null}
-        <span>{(effectiveKey === "nh_map_value" || choroplethRange != null) ? formatLegendBound(colorDomain.hi, effectiveKey) : "Higher"} ↑</span>
+        <span className="shrink-0 text-right">
+          {effectiveKey === "nh_map_value" || choroplethRange != null
+            ? `${formatLegendBound(legendBoundHi, effectiveKey)} ↑`
+            : "Higher ↑"}
+        </span>
       </div>
-      <div className="mt-2 flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
+      {effectiveKey === "nh_map_value" && choroplethRange != null ? (
+        <p className="mt-1 shrink-0 text-[9px] leading-tight text-nh-brown-muted break-words">
+          Contrast ramp: {rampLoDisp}–{rampHiDisp}. Hover a tract for raw indicators.
+        </p>
+      ) : null}
+      <div className="mt-2 flex shrink-0 items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
         <span
           className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border border-orange-400/70 shadow-sm"
           style={{ backgroundColor: NO_DATA_CHOROPLETH_FILL }}
           aria-hidden
         />
-        <p className="text-[9px] text-orange-800 mt-0.5">
-         No data available for this metric
-        </p>
+        <p className="mt-0.5 text-[9px] leading-snug text-orange-800 break-words">No data for this layer</p>
       </div>
-      <p className="mt-1.5 max-w-[11rem] text-[11px] leading-snug text-nh-brown-muted">{legendScaleHint}</p>
+    </div>
+  ) : (
+    <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
+      <p className="shrink-0 text-[10px] font-semibold uppercase leading-snug tracking-wide text-nh-brown-muted break-words">
+        {legendMetricLabel}
+      </p>
+      <div
+        className="mt-2 h-3 w-full max-w-[9rem] shrink-0 rounded-full shadow-inner ring-1 ring-slate-200/80"
+        style={{
+          background: `linear-gradient(to right, ${CHORO_COLORS.join(", ")})`,
+        }}
+      />
+      <div className="mt-1 flex shrink-0 items-start justify-between gap-1 text-[10px] text-nh-brown-muted">
+        <span className="shrink-0">
+          ↓{" "}
+          {(effectiveKey === "nh_map_value" || choroplethRange != null)
+            ? formatLegendBound(colorDomain.lo, effectiveKey)
+            : "Lower"}
+        </span>
+        {effectiveKey === "nh_map_value" && choroplethRange != null ? (
+          <span className="flex min-w-0 flex-1 flex-col items-center text-center leading-tight">
+            <span className="font-medium text-nh-brown/80">
+              {Math.round((colorDomain.lo + colorDomain.hi) / 2)}
+            </span>
+            <span className="text-[9px] text-nh-brown-muted/90">Map mid (index)</span>
+          </span>
+        ) : null}
+        <span className="shrink-0 text-right">
+          {(effectiveKey === "nh_map_value" || choroplethRange != null)
+            ? formatLegendBound(colorDomain.hi, effectiveKey)
+            : "Higher"}{" "}
+          ↑
+        </span>
+      </div>
+      <div className="mt-2 flex shrink-0 items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
+        <span
+          className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border border-orange-400/70 shadow-sm"
+          style={{ backgroundColor: NO_DATA_CHOROPLETH_FILL }}
+          aria-hidden
+        />
+        <p className="mt-0.5 text-[9px] leading-snug text-orange-800 break-words">No data for this metric</p>
+      </div>
+      <p className="mt-1.5 max-w-[11rem] shrink-0 text-[11px] leading-snug text-nh-brown-muted">{legendScaleHint}</p>
     </div>
   );
 
@@ -961,14 +1211,14 @@ function NeighborMapInner({
             ? legend
             : null;
     return (
-      <div className="relative isolate h-full min-h-[220px] w-full flex-1 overflow-hidden rounded-xl border border-nh-brown/10 bg-nh-sand/40 shadow-inner sm:min-h-[260px]">
+      <div ref={mapShellRef} className="relative isolate h-full min-h-[220px] w-full flex-1 overflow-hidden rounded-xl border border-nh-brown/10 bg-nh-sand/40 shadow-inner sm:min-h-[260px]">
         {leftChrome ? (
           <div className="pointer-events-none absolute left-3 top-3 z-10 max-h-[70vh] overflow-y-auto">
             <div className="pointer-events-auto flex flex-col gap-2">{leftChrome}</div>
           </div>
         ) : null}
         {rightLegend ? (
-          <div className="pointer-events-none absolute right-3 top-3 z-10">
+          <div className="pointer-events-none absolute right-3 top-3 z-10 overflow-visible">
             <div className="pointer-events-auto">{rightLegend}</div>
           </div>
         ) : null}
@@ -979,8 +1229,8 @@ function NeighborMapInner({
   }
 
   return (
-    <div className="flex h-[min(720px,80vh)] flex-col gap-3 lg:flex-row">
-      <div className="flex w-full flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm lg:max-w-xs">
+    <div className="flex h-[min(720px,80vh)] flex-col gap-3 md:flex-row">
+      <div className="flex w-full flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm md:max-w-xs">
         <div>
           <label className="text-xs font-medium uppercase text-slate-500">Map color</label>
           <select
@@ -999,7 +1249,7 @@ function NeighborMapInner({
           Choose a single metric to color tracts. Tract outlines stay on; the color ramp matches the selected field.
         </p>
       </div>
-      <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-lg border border-slate-200 shadow-inner">
+      <div ref={mapShellRef} className="relative min-h-[420px] flex-1 overflow-hidden rounded-lg border border-slate-200 shadow-inner">
         {hoverLegend}
         {mapEl}
       </div>

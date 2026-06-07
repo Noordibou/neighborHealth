@@ -40,10 +40,30 @@ import { parseExploreUrl, useExploreUrlSync } from "./useExploreUrlSync";
 import { useExploreSearch } from "./useExploreSearch";
 
 function mapFillLabel(mode: ExploreLayerMode): string {
-  if (mode === "composite") return "Priority index — composite";
-  if (mode === "housing") return "Housing — rent burden";
-  if (mode === "health") return "Health — blended uninsured, asthma, mental health";
-  return "Overlap — housing stress × health burden";
+  if (mode === "composite") return "Composite risk (0–100)";
+  if (mode === "housing") return "Housing stress blend";
+  if (mode === "health") return "Health burden blend";
+  return "Overlap — housing × health";
+}
+
+function mapLegendDetail(mode: ExploreLayerMode): string | null {
+  if (mode === "overlap") return null;
+  if (mode === "composite") {
+    return (
+      "Same composite risk score (0–100) as tract profiles and exports. " +
+      "The color ramp is stretched across the range of scores on this map so nearby values look different; numbers are still the national index."
+    );
+  }
+  if (mode === "housing") {
+    return (
+      "Map color is the average of nationally normalized 0–100 scores for rent burden, overcrowding, and structural vacancy " +
+      "(from stored component scores on each tract). At least two of those three must be present; otherwise the tract is shown as no data."
+    );
+  }
+  return (
+    "Map color is the average of nationally normalized 0–100 scores for uninsured rate, asthma prevalence, and mental health prevalence " +
+    "(from stored component scores). At least two of those three must be present; otherwise the tract is shown as no data."
+  );
 }
 
 const PRIORITY_THRESHOLDS: Record<ExploreLayerMode, number | null> = {
@@ -55,8 +75,8 @@ const PRIORITY_THRESHOLDS: Record<ExploreLayerMode, number | null> = {
 
 function priorityFlagCopy(mode: ExploreLayerMode): string {
   if (mode === "composite") return `flagged priority (score ≥ ${SCORE_THRESHOLDS.mapFlag})`;
-  if (mode === "housing") return `flagged priority (rent burden ≥ ${SCORE_THRESHOLDS.mapFlagHousing}%)`;
-  if (mode === "health") return `flagged priority (health blend ≥ ${SCORE_THRESHOLDS.mapFlagHealth})`;
+  if (mode === "housing") return `flagged priority (housing blend index ≥ ${SCORE_THRESHOLDS.mapFlagHousing})`;
+  if (mode === "health") return `flagged priority (health blend index ≥ ${SCORE_THRESHOLDS.mapFlagHealth})`;
   return "in high-overlap zone (class 3-3)";
 }
 
@@ -78,6 +98,10 @@ function ExploreInner() {
   /** When false, skip persisting so hydrate does not overwrite sessionStorage with default state. */
   const [sessionReady, setSessionReady] = useState(false);
   const [rankedForTray, setRankedForTray] = useState<RankedTractRow[]>([]);
+  const [mobileMode, setMobileMode] = useState<"map" | "list">("map");
+  const [mobileSheetDismissed, setMobileSheetDismissed] = useState(false);
+  const [mobileTrayExpanded, setMobileTrayExpanded] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [layerMode, setLayerMode] = useState<ExploreLayerMode>("composite");
   const [compareTray, setCompareTray] = useState<string[]>([]);
   /** Avoid persisting initial `[]` before layout hydration reads sessionStorage (was clearing the tray). */
@@ -458,6 +482,11 @@ function ExploreInner() {
 
   const tractCountOnMap = mapMode === "search" ? augmentedSearch?.features?.length ?? 0 : augmentedBrowse?.features?.length ?? 0;
 
+  // Auto-show the mobile bottom sheet whenever a new tract is selected.
+  useEffect(() => {
+    if (selectedGeoid) setMobileSheetDismissed(false);
+  }, [selectedGeoid]);
+
   const stateLabel = useMemo(() => {
     if (!stateFips) return "United States";
     const sf = stateFips.padStart(2, "0").slice(0, 2);
@@ -556,8 +585,8 @@ function ExploreInner() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col pb-[9.5rem] pt-0 sm:pb-36 xl:flex-row xl:pb-16 ">
-        <aside className="flex max-h-[min(52vh,420px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-nh-brown/10 bg-white/90 xl:h-full xl:max-h-none xl:w-[360px] xl:border-b-0 xl:border-r">
+      <div className="flex min-h-0 flex-1 flex-col pb-0 md:flex-row md:pb-16">
+        <aside className="hidden min-h-0 shrink-0 flex-col overflow-hidden border-nh-brown/10 md:flex md:h-full md:w-[360px] md:border-r md:bg-white/90">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
             <section className="rounded-xl border border-nh-brown/10 bg-nh-cream/40 p-3 shadow-sm">
               <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Search</p>
@@ -714,14 +743,14 @@ function ExploreInner() {
           </div>
         </aside>
 
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col px-2 pt-2 lg:min-h-0 lg:px-4">
+        <div className={`relative flex min-w-0 flex-col md:min-h-0 md:flex-1 md:px-4 md:pt-2 ${mobileMode === "list" ? "h-[35dvh] shrink-0" : "min-h-0 flex-1"}`}>
           {exploreDataStatus.stateCount > 0 ? (
-            <p className="mb-1.5 text-[10px] leading-snug text-nh-brown-muted">
+            <p className="mb-1.5 hidden text-[10px] leading-snug text-nh-brown-muted md:block">
               Data: ACS 2022 · {exploreDataStatus.total.toLocaleString()} tracts across{" "}
               {exploreDataStatus.stateCount} states
             </p>
           ) : null}
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted">
+          <div className="mb-2 hidden items-center justify-between gap-3 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted md:flex md:flex-wrap">
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-nh-brown-muted">
                 Layer
@@ -791,6 +820,8 @@ function ExploreInner() {
                     onSelectTract={onSelectTract}
                     fillProperty="nh_map_value"
                     fillLabel={mapFillLabel(layerMode)}
+                    fillLegendDetail={mapLegendDetail(layerMode)}
+                    fillLegendKind={layerMode}
                     choroplethStyle={layerMode === "overlap" ? "bivariate" : "ramp"}
                     suppressBuiltInBivariateLegend={layerMode === "overlap"}
                     showMetricControl={false}
@@ -851,6 +882,8 @@ function ExploreInner() {
                     onSelectTract={onSelectTract}
                     fillProperty="nh_map_value"
                     fillLabel={mapFillLabel(layerMode)}
+                    fillLegendDetail={mapLegendDetail(layerMode)}
+                    fillLegendKind={layerMode}
                     choroplethStyle={layerMode === "overlap" ? "bivariate" : "ramp"}
                     suppressBuiltInBivariateLegend={layerMode === "overlap"}
                     showMetricControl={false}
@@ -874,40 +907,117 @@ function ExploreInner() {
               )}
             </div>
           )}
+
+          {/* Mobile: floating search pill (map mode) */}
+          {mobileMode === "map" && (
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen(true)}
+              className="absolute left-4 right-4 top-3 z-30 flex h-12 items-center gap-3 rounded-full border border-nh-brown/10 bg-white px-4 shadow-lg md:hidden"
+            >
+              <svg className="h-4 w-4 shrink-0 text-nh-brown-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <span className="min-w-0 flex-1 truncate text-left text-sm text-nh-brown-muted">
+                {q.trim() ? q : "Search neighborhoods…"}
+              </span>
+              {q.trim() && (
+                <span className="shrink-0 text-xs font-semibold text-nh-terracotta">Clear</span>
+              )}
+            </button>
+          )}
+
+          {/* Mobile: compact layer tab strip */}
+          <div className="absolute left-0 right-0 z-20 flex overflow-x-auto md:hidden" style={{ top: mobileMode === "map" ? "3.75rem" : "0.5rem" }}>
+            <div className="flex shrink-0 gap-1 px-3 pb-1.5 pt-1">
+              {layerTabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setLayerMode(t.id)}
+                  className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+                    layerMode === t.id
+                      ? "bg-nh-brown text-white"
+                      : "border border-nh-brown/15 bg-white/95 text-nh-brown hover:bg-nh-cream"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mobile: "Show rankings" (map mode) / "Back to map" (list mode) */}
+          <div className="absolute bottom-14 left-0 right-0 z-20 flex justify-center md:hidden">
+            {mobileMode === "map" ? (
+              <button
+                type="button"
+                onClick={() => setMobileMode("list")}
+                className="flex items-center gap-2 rounded-full bg-nh-brown/90 px-5 py-3 text-sm font-semibold text-nh-cream shadow-lg backdrop-blur-sm"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                Rankings{rankedForTray.length > 0 ? ` (${rankedForTray.length}+)` : stateFips ? "" : ""}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setMobileMode("map")}
+                className="rounded-full border border-nh-brown/15 bg-white/95 px-4 py-2 text-xs font-semibold text-nh-brown shadow"
+              >
+                ← Map view
+              </button>
+            )}
+          </div>
         </div>
 
-        <aside className="flex max-h-[min(40vh,360px)] min-h-0 shrink-0 flex-col overflow-hidden border-t border-[#e8e3dc] bg-[#faf8f5] xl:h-full xl:max-h-none xl:w-[380px] xl:border-l xl:border-t-0">
+        <aside className={`min-h-0 flex-col overflow-hidden border-[#e8e3dc] bg-[#faf8f5] md:flex md:flex-none md:h-full md:w-[380px] md:border-l ${mobileMode === "list" ? "flex flex-1" : "hidden"}`}>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-            <div>
-              {!selectedGeoid && !stateFips && (
-                <div className="rounded-xl border border-nh-brown/10 bg-nh-cream/50 p-4">
-                  <h3 className="font-display text-base font-semibold text-nh-brown">
-                    Find high-burden communities
-                  </h3>
-                  <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
-                    Select a state on the map to view tract rankings by housing stress and health burden.
+            {/* Mobile list mode: back to map button */}
+            <div className="mb-1 md:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileMode("map")}
+                className="flex items-center gap-1.5 text-sm font-semibold text-nh-terracotta"
+              >
+                ← Back to map
+              </button>
+            </div>
+
+            {/* TractDetailPanel — desktop sidebar only; mobile uses the bottom sheet */}
+            <div className="hidden md:block">
+              <div>
+                {!selectedGeoid && !stateFips && (
+                  <div className="rounded-xl border border-nh-brown/10 bg-nh-cream/50 p-4">
+                    <h3 className="font-display text-base font-semibold text-nh-brown">
+                      Find high-burden communities
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
+                      Select a state on the map to view tract rankings by housing stress and health burden.
+                    </p>
+                    <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
+                      Or search for a neighborhood, address, or Census tract ID using the search bar.
+                    </p>
+                  </div>
+                )}
+                {!selectedGeoid && stateFips && (
+                  <p className="text-sm leading-relaxed text-[#6b6560]">
+                    Click a tract on the map to inspect scores and add to compare.
                   </p>
-                  <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
-                    Or search for a neighborhood, address, or Census tract ID using the search bar.
-                  </p>
-                </div>
-              )}
-              {!selectedGeoid && stateFips && (
-                <p className="text-sm leading-relaxed text-[#6b6560]">
-                  Click a tract on the map to inspect scores and add to compare.
-                </p>
-              )}
-              {selectedGeoid && selectedDetailErr && (
-                <p className="mt-2 text-sm text-red-600">{selectedDetailErr}</p>
-              )}
-              <TractDetailPanel
-                tract={selectedDetail}
-                isInCompare={selectedDetail != null && compareTray.includes(selectedDetail.geoid)}
-                compareDisabled={compareTray.length >= 4}
-                onAddToCompare={() => {
-                  if (selectedDetail) setCompareTray(addToCompareTray(selectedDetail.geoid));
-                }}
-              />
+                )}
+                {selectedGeoid && selectedDetailErr && (
+                  <p className="mt-2 text-sm text-red-600">{selectedDetailErr}</p>
+                )}
+                <TractDetailPanel
+                  tract={selectedDetail}
+                  isInCompare={selectedDetail != null && compareTray.includes(selectedDetail.geoid)}
+                  compareDisabled={compareTray.length >= 4}
+                  onAddToCompare={() => {
+                    if (selectedDetail) setCompareTray(addToCompareTray(selectedDetail.geoid));
+                  }}
+                />
+              </div>
             </div>
 
             <TopTractsPanel
@@ -929,8 +1039,9 @@ function ExploreInner() {
         </aside>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-nh-brown/10 bg-nh-cream/95 px-4 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_rgba(44,24,16,0.08)] backdrop-blur-md sm:py-3">
-        <div className="mx-auto flex max-w-[1920px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* Desktop compare tray — full bar at bottom (md+) */}
+      <div className="hidden md:block fixed bottom-0 left-0 right-0 z-40 border-t border-nh-brown/10 bg-nh-cream/95 px-4 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] pt-2.5 shadow-[0_-8px_24px_rgba(44,24,16,0.08)] backdrop-blur-md md:py-3">
+        <div className="mx-auto flex max-w-[1920px] flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Compare tray</p>
             <p className="text-xs text-nh-brown-muted">
@@ -973,8 +1084,183 @@ function ExploreInner() {
           </div>
         </div>
       </div>
+
+      {/* Mobile compact compare tray pill */}
+      {compareTray.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-40 md:hidden">
+          {mobileTrayExpanded ? (
+            <div className="w-[calc(100vw-2rem)] max-w-[320px] rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Compare tray</p>
+                <button
+                  type="button"
+                  onClick={() => setMobileTrayExpanded(false)}
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-nh-brown-muted hover:bg-nh-sand"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="space-y-2">
+                {compareTray.map((g) => {
+                  const row = rankedForTray.find((x) => x.geoid === g);
+                  return (
+                    <div key={g} className="flex items-center gap-2 rounded-lg border border-nh-brown/15 bg-nh-cream px-3 py-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate font-medium text-nh-brown">{row?.name ?? g}</span>
+                      <button
+                        type="button"
+                        className="shrink-0 text-nh-brown-muted hover:text-red-600"
+                        aria-label="Remove"
+                        onClick={() => setCompareTray(removeFromCompareTray(g))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                disabled={compareTray.length < 2}
+                onClick={() => router.push(`/compare?geoids=${encodeURIComponent(compareTray.join(","))}`)}
+                className="mt-3 w-full rounded-full bg-nh-brown py-2.5 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Open compare →
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setMobileTrayExpanded(true)}
+              className="flex items-center gap-2 rounded-full bg-nh-brown px-5 py-3 text-sm font-semibold text-nh-cream shadow-lg"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Compare ({compareTray.length})
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Mobile bottom sheet: selected tract detail */}
+      {selectedGeoid && !mobileSheetDismissed && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[60dvh] min-h-[44dvh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl md:hidden">
+          <div className="relative flex shrink-0 items-center justify-center px-4 pt-3 pb-1">
+            <div className="h-1 w-8 rounded-full bg-nh-sand" />
+            <button
+              type="button"
+              className="absolute right-4 top-3 flex h-8 w-8 items-center justify-center rounded-full text-nh-brown-muted hover:bg-nh-sand"
+              aria-label="Dismiss"
+              onClick={() => setMobileSheetDismissed(true)}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-2">
+            {selectedDetailErr && <p className="mb-2 text-sm text-red-600">{selectedDetailErr}</p>}
+            <TractDetailPanel
+              tract={selectedDetail}
+              isInCompare={selectedDetail != null && compareTray.includes(selectedDetail.geoid)}
+              compareDisabled={compareTray.length >= 4}
+              onAddToCompare={() => {
+                if (selectedDetail) setCompareTray(addToCompareTray(selectedDetail.geoid));
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Mobile full-screen search overlay */}
+      {mobileSearchOpen && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-nh-cream md:hidden">
+          <div className="shrink-0 border-b border-nh-brown/10 bg-nh-cream/98 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setMobileSearchOpen(false)}
+                className="shrink-0 text-sm font-semibold text-nh-terracotta"
+              >
+                ← Back
+              </button>
+              <form
+                onSubmit={(e) => { onSearchSubmit(e); setMobileSearchOpen(false); }}
+                className="relative flex-1"
+              >
+                <svg
+                  className="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-nh-brown-muted"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  autoFocus
+                  autoComplete="off"
+                  className="w-full rounded-xl border border-nh-brown/15 bg-white py-2.5 pl-10 pr-3 text-sm text-nh-brown focus:border-nh-terracotta focus:outline-none focus:ring-1 focus:ring-nh-terracotta"
+                  placeholder="Tract, neighborhood, address…"
+                  value={q}
+                  onChange={(e) => { setQ(e.target.value); setSearchNarrowFips(null); }}
+                  onFocus={() => setSuggestOpen(true)}
+                />
+              </form>
+              {q.trim() && (
+                <button
+                  type="button"
+                  onClick={() => { clearSearch(); }}
+                  className="shrink-0 text-xs font-semibold text-nh-brown-muted"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          {suggestOpen && suggestions.length > 0 ? (
+            <ul className="min-h-0 flex-1 overflow-y-auto divide-y divide-nh-brown/5 bg-white">
+              {suggestions.map((item, idx) => (
+                <li key={`${item.kind}-${item.label}-${item.state_fips ?? ""}-${idx}`}>
+                  <button
+                    type="button"
+                    className="flex w-full items-start gap-2 px-4 py-3 text-left hover:bg-nh-cream"
+                    onClick={() => { onPickSuggestion(item); setMobileSearchOpen(false); }}
+                  >
+                    <span className="mt-0.5 shrink-0 rounded bg-nh-sand px-1.5 py-0.5 text-[10px] font-semibold uppercase text-nh-brown-muted">
+                      {item.kind}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium text-nh-brown">{item.label}</span>
+                      {item.detail ? (
+                        <span className="mt-0.5 block truncate text-xs text-nh-brown-muted">{item.detail}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="flex-1 px-4 py-6 text-sm text-nh-brown-muted">
+              {q.trim() ? "Searching…" : "Type a neighborhood, address, or Census tract ID."}
+            </div>
+          )}
+          <div className="shrink-0 border-t border-nh-brown/10 p-4">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                const synth = new Event("submit", { bubbles: true, cancelable: true });
+                onSearchSubmit(synth as unknown as React.FormEvent);
+                setMobileSearchOpen(false);
+              }}
+              className="w-full rounded-xl bg-nh-terracotta py-3 text-sm font-semibold text-white shadow-sm hover:bg-nh-terracotta-dark"
+            >
+              Search map
+            </button>
+          </div>
+        </div>
+      )}
     </div>
-    <div className="pb-[9.5rem] sm:pb-36 xl:pb-16">
+    <div className="md:pb-16">
       <SiteFooter />
     </div>
     </>

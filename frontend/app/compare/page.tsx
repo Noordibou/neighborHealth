@@ -539,10 +539,10 @@ function CompareInner() {
           )}
         </div>
 
-        <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-widest text-nh-terracotta">Compare</p>
-            <h1 className="mt-1 font-display text-3xl font-semibold text-nh-brown md:text-4xl">
+            <h1 className="mt-1 font-display text-2xl font-semibold text-nh-brown md:text-3xl xl:text-4xl">
               {geoids.length} tracts side by side
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-nh-brown-muted">
@@ -550,22 +550,30 @@ function CompareInner() {
               national median (50th percentile).
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className="min-w-[140px] rounded-full border border-nh-brown/15 bg-white px-3 py-2 text-sm"
-              placeholder="Add Census tract ID"
-              value={addInput}
-              onChange={(e) => setAddInput(e.target.value)}
-              disabled={geoids.length >= 4}
-            />
-            <button
-              type="button"
-              onClick={addGeoid}
-              disabled={geoids.length >= 4}
-              className="rounded-full border border-dashed border-nh-terracotta bg-white px-4 py-2 text-sm font-semibold text-nh-terracotta hover:bg-nh-cream disabled:opacity-40"
+          <div className="flex flex-col gap-2">
+            <Link
+              href="/explore"
+              className="text-sm font-semibold text-nh-terracotta hover:underline"
             >
-              + Add
-            </button>
+              ← Add more tracts from the map
+            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                className="min-w-[140px] rounded-full border border-nh-brown/15 bg-white px-3 py-2 text-sm"
+                placeholder="Add Census tract ID"
+                value={addInput}
+                onChange={(e) => setAddInput(e.target.value)}
+                disabled={geoids.length >= 4}
+              />
+              <button
+                type="button"
+                onClick={addGeoid}
+                disabled={geoids.length >= 4}
+                className="rounded-full border border-dashed border-nh-terracotta bg-white px-4 py-2 text-sm font-semibold text-nh-terracotta hover:bg-nh-cream disabled:opacity-40"
+              >
+                + Add
+              </button>
+            </div>
           </div>
         </div>
 
@@ -579,7 +587,7 @@ function CompareInner() {
 
         {data && geoids.length >= 2 && (
           <>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
               {data.series.map((s, i) => {
                 const badge = compositeBadge(s as Record<string, number | string>);
                 const flag = badge != null && badge >= SCORE_THRESHOLDS.priorityBadge ? "Priority" : "Stable";
@@ -674,7 +682,7 @@ function CompareInner() {
                 </div>
               </div>
               <div className="overflow-x-auto rounded-2xl border border-nh-brown/10 bg-white shadow-sm">
-                <table className="min-w-full border-collapse text-left text-sm">
+                <table className="min-w-[480px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-nh-brown/10 bg-nh-cream/80">
                       <th className="px-4 py-3 font-semibold text-nh-brown">Indicator</th>

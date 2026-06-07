@@ -28,8 +28,8 @@ export function TractScorecardTable({ tract }: { tract: TractDetail }) {
           <tr className="border-b border-nh-brown/10 bg-nh-cream/80">
             <th className="px-4 py-3 font-semibold text-nh-brown">Indicator</th>
             <th className="px-4 py-3 font-semibold text-nh-brown">Tract</th>
-            <th className="px-4 py-3 font-semibold text-nh-brown-muted">County pct.</th>
-            <th className="px-4 py-3 font-semibold text-nh-brown-muted">State pct.</th>
+            <th className="hidden px-4 py-3 font-semibold text-nh-brown-muted md:table-cell">County pct.</th>
+            <th className="hidden px-4 py-3 font-semibold text-nh-brown-muted md:table-cell">State pct.</th>
             <th className="px-4 py-3 font-semibold text-nh-brown-muted">National pct.</th>
           </tr>
         </thead>
@@ -82,10 +82,10 @@ export function TractScorecardTable({ tract }: { tract: TractDetail }) {
                     ) : null}
                   </span>
                 </td>
-                <td className="px-4 py-3">
+                <td className="hidden px-4 py-3 md:table-cell">
                   <PercentileCell value={ind?.percentile_county} />
                 </td>
-                <td className="px-4 py-3">
+                <td className="hidden px-4 py-3 md:table-cell">
                   <PercentileCell value={ind?.percentile_state} />
                 </td>
                 <td className="px-4 py-3">
@@ -101,7 +101,8 @@ export function TractScorecardTable({ tract }: { tract: TractDetail }) {
               colSpan={5}
               className="px-4 py-2.5 text-[11px] leading-snug text-nh-brown-muted border-t border-nh-brown/5"
             >
-              Higher percentile = greater burden relative to peers in that geography.
+              Higher percentile = greater burden relative to peers.
+              <span className="ml-1 md:hidden text-nh-brown-muted/70">(County &amp; state columns visible on wider screens.)</span>
             </td>
           </tr>
         </tfoot>

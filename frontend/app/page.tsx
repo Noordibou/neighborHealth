@@ -5,9 +5,9 @@ export default function LandingPage() {
   return (
     <div className="flex min-h-screen flex-col bg-nh-cream text-nh-brown">
       <section className="border-b border-nh-brown/10">
-        <div className="mx-auto grid max-w-7xl gap-12 px-4 py-14 lg:grid-cols-2 lg:items-center lg:py-20">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 py-14 md:grid-cols-2 md:items-center md:py-20">
           <div>
-            <h1 className="font-display text-4xl font-semibold leading-tight tracking-tight text-nh-brown md:text-5xl">
+            <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight text-nh-brown sm:text-4xl md:text-5xl">
               Find where housing stress and{" "}
               <span className="text-nh-terracotta italic">health risk overlap.</span>
             </h1>
@@ -124,7 +124,7 @@ export default function LandingPage() {
       <section id="methodology" className="border-t border-nh-brown/10 bg-white/60 py-16">
         <div className="mx-auto max-w-7xl px-4">
           <p className="text-xs font-bold uppercase tracking-widest text-nh-terracotta">Methodology</p>
-          <h2 className="mt-2 font-display text-3xl font-semibold text-nh-brown">How the index is built.</h2>
+          <h2 className="mt-2 font-display text-2xl font-semibold text-nh-brown md:text-3xl">How the index is built.</h2>
           <p className="mt-4 max-w-2xl text-sm leading-relaxed text-nh-brown-muted">
             Each tract receives a 0–100 score from publicly available housing and health indicators. We percentile-rank
             metrics within the comparison cohort, apply domain-informed weights, and surface the blend on the map and in

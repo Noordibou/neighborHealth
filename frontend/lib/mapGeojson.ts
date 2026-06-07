@@ -94,6 +94,8 @@ function classifyTertile(value: number | null, breaks: [number, number] | null):
  * Layer 1 (expensive): compute bivariate class + housing/health properties for every feature.
  * Results depend only on the raw GeoJSON values — not on which layer tab is active.
  * Call this once when GeoJSON loads; memoize on [geojson] reference only.
+ * `nh_map_value` is set to null here; `applyLayerMode` assigns the active tab value
+ * on cloned feature properties so MapLibre `<Source>` deep-compare detects updates.
  *
  * Housing and health blends use normalized component scores (cs_ prefix) so that
  * all three contributing metrics are on the same 0–100 scale before blending.
@@ -138,9 +140,12 @@ export function augmentGeoJSONForYear(
 
 /**
  * Layer 2 (cheap): set nh_map_value on each feature for the active layer mode.
- * Mutates feature properties in place (no new feature objects) and returns a new
- * FeatureCollection wrapper so React detects a reference change and MapLibre's
- * Source component calls source.setData() to refresh tile rendering.
+ *
+ * Returns new feature + properties objects (not in-place mutation). MapLibre's
+ * React `<Source>` uses deep equality on `data`; reusing the same `features`
+ * array reference makes `deepEqual(prev, next)` true immediately (`a === b`)
+ * even when nested `nh_map_value` changed — so `setData` never runs and the
+ * choropleth colors stick on the previous layer.
  *
  * All three modes produce values on the same 0–100 normalized scale so the
  * fixed-domain choropleth in NeighborMap renders consistently across states.
@@ -154,33 +159,26 @@ export function applyLayerMode(
   mode: MapLayerMode
 ): GeoJSON.FeatureCollection | null {
   if (!fc) return null;
-  for (const f of fc.features) {
-    if (!f.properties) continue;
+  const features = fc.features.map((f) => {
+    if (!f.properties) return f;
     const p = f.properties as Record<string, unknown>;
     let mapValue: number | null = null;
     if (mode === "composite") {
       mapValue = numProp(p, "composite_score");
     } else if (mode === "housing") {
-      const a = numProp(p, "cs_rent_burden_pct");
-      const b = numProp(p, "cs_overcrowding_pct");
-      const c = numProp(p, "cs_structural_vacancy_rate");
-      const nums = [a, b, c].filter((x): x is number => x != null);
-      mapValue = nums.length >= MIN_METRICS_FOR_BLEND
-        ? nums.reduce((s, x) => s + x, 0) / nums.length
-        : null;
+      mapValue = housingStressRawFromProps(p);
     } else {
-      // health
-      const a = numProp(p, "cs_uninsured_pct");
-      const b = numProp(p, "cs_asthma_pct");
-      const c = numProp(p, "cs_mental_health_pct");
-      const nums = [a, b, c].filter((x): x is number => x != null);
-      mapValue = nums.length >= MIN_METRICS_FOR_BLEND
-        ? nums.reduce((s, x) => s + x, 0) / nums.length
-        : null;
+      mapValue = healthBurdenRawFromProps(p);
     }
-    p.nh_map_value = mapValue;
-  }
-  return { ...fc }; // new wrapper reference — React sees a prop change
+    return {
+      ...f,
+      properties: {
+        ...p,
+        nh_map_value: mapValue,
+      },
+    };
+  });
+  return { ...fc, features };
 }
 
 /** @deprecated Use augmentGeoJSONForYear + applyLayerMode separately for better memoization. */

@@ -104,18 +104,18 @@ export default async function TractPage({ params }: Props) {
           ) : null}
         </div>
 
-        <div className="mt-6 grid gap-8 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-start lg:gap-x-8">
-          <div className="flex shrink-0 flex-col items-center gap-2 sm:items-start lg:items-start">
+        <div className="mt-6 grid gap-8 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-start md:gap-x-8">
+          <div className="flex shrink-0 flex-col items-center gap-2 sm:items-start md:items-start">
             {scoreRounded != null && (
               <>
                 <div
-                  className="relative flex h-36 w-36 shrink-0 items-center justify-center rounded-full border-[8px] border-nh-terracotta/25 bg-white shadow-inner"
+                  className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full border-[6px] border-nh-terracotta/25 bg-white shadow-inner md:h-36 md:w-36 md:border-[8px]"
                   aria-label={`Composite score ${scoreRounded} out of 100`}
                 >
                   <div className="text-center">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Composite</p>
-                    <p className="font-display text-4xl font-bold text-nh-terracotta">{scoreRounded}</p>
-                    <p className="text-[9px] text-nh-brown-muted">out of 100</p>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-nh-brown-muted md:text-[10px]">Composite</p>
+                    <p className="font-display text-3xl font-bold text-nh-terracotta md:text-4xl">{scoreRounded}</p>
+                    <p className="text-[8px] text-nh-brown-muted md:text-[9px]">out of 100</p>
                   </div>
                 </div>
                 <p className="text-center text-[11px] text-nh-brown-muted sm:text-left">
@@ -139,9 +139,9 @@ export default async function TractPage({ params }: Props) {
               </div>
             ) : null}
           </div>
-          <div className="min-w-0 lg:pt-0">
+          <div className="min-w-0 md:pt-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-nh-brown-muted">Neighborhood profile</p>
-            <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-nh-brown md:text-4xl">
+            <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-nh-brown md:text-3xl xl:text-4xl">
               {tract.name ?? `Tract ${tract.geoid}`}
             </h1>
             <p className="mt-2 text-lg text-nh-brown-muted">{place || `Tract ID ${tract.geoid}`}</p>
@@ -151,7 +151,7 @@ export default async function TractPage({ params }: Props) {
                 : "Open compare from the map explorer to contrast nearby areas, or export a PDF for stakeholders."}
             </p>
           </div>
-          <div className="flex shrink-0 flex-col items-stretch lg:items-end">
+          <div className="flex shrink-0 flex-col items-stretch md:items-end">
             <ScorecardActions geoid={tract.geoid} />
           </div>
         </div>
