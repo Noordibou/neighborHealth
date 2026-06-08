@@ -2,13 +2,10 @@ import Link from "next/link";
 
 type Props = { className?: string };
 
-/** Full-bleed so the bar spans the viewport when nested inside max-w-* shells (compare, tract, etc.). */
-const FOOTER_BLEED = "w-screen max-w-[100vw] shrink-0 ml-[calc(50%-50vw)]";
-
-/** Site-wide footer (dark theme). */
+/** Site-wide footer (dark theme). Full width of its containing block — place outside max-w-* when a viewport-wide bar is desired. */
 export function SiteFooter({ className }: Props) {
   return (
-    <footer className={`bg-nh-brown text-nh-cream/90 ${FOOTER_BLEED} ${className ?? ""}`}>
+    <footer className={`w-full shrink-0 min-w-0 bg-nh-brown text-nh-cream/90 ${className ?? ""}`}>
       <div className="mx-auto max-w-7xl px-4 py-14">
         <div className="grid gap-12 md:grid-cols-[1.2fr_2fr]">
           <div>
@@ -18,7 +15,7 @@ export function SiteFooter({ className }: Props) {
               into a single prioritization lens for outreach and planning.
             </p>
           </div>
-          <div className="grid gap-10 sm:grid-cols-3" id="sources">
+          <div className="grid gap-10 sm:grid-cols-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-nh-cream/50">Data sources</p>
               <ul className="mt-3 space-y-2 text-sm text-nh-cream/80">
@@ -38,7 +35,7 @@ export function SiteFooter({ className }: Props) {
                 </li>
                 <li>
                   <Link href="/#methodology" className="text-nh-cream/85 hover:text-white hover:underline">
-                    Methodology
+                    Methods & data
                   </Link>
                 </li>
                 <li>

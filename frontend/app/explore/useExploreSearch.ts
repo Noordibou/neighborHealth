@@ -19,6 +19,7 @@ function looksLikeUsStreetAddress(s: string): boolean {
 
 export function useExploreSearch({
   initialQ,
+  initialStateFips,
   clearViewport,
   onSelectState,
   setMapMode,
@@ -30,6 +31,8 @@ export function useExploreSearch({
   setSearchZoomKey,
 }: {
   initialQ: string;
+  /** `state` URL param (2-digit FIPS), passed into initial map search narrow. */
+  initialStateFips: string | null;
   clearViewport: () => void;
   onSelectState: (fips: string) => void;
   setMapMode: (mode: "browse" | "search") => void;
@@ -42,7 +45,7 @@ export function useExploreSearch({
 }) {
   const router = useRouter();
   const [q, setQ] = useState(initialQ);
-  const [searchNarrowFips, setSearchNarrowFips] = useState<string | null>(null);
+  const [searchNarrowFips, setSearchNarrowFips] = useState<string | null>(initialStateFips);
   const [suggestions, setSuggestions] = useState<SearchSuggestItem[]>([]);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [searchResultsExpanded, setSearchResultsExpanded] = useState(true);
@@ -62,31 +65,10 @@ export function useExploreSearch({
     return () => clearTimeout(id);
   }, [q]);
 
-  // If ?q= was supplied on load, run one search and redirect to the top tract.
-  useEffect(() => {
-    if (!initialQ) return;
-    const key = `nh-explore-q-${initialQ}`;
-    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(key)) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await searchTracts(initialQ);
-        if (cancelled || !r.results[0]) return;
-        if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, "1");
-        router.replace(`/tract/${r.results[0].geoid}`);
-      } catch {
-        /* stay on explore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [initialQ, router]);
-
   const runSearchOnMap = useCallback(
-    async (query: string, narrow?: string | null) => {
+    async (query: string, narrow?: string | null): Promise<boolean> => {
       const t = query.trim();
-      if (!t) return;
+      if (!t) return false;
       setSearchError(null);
       setSearchInfo(null);
       setSearchMapLoading(true);
@@ -110,14 +92,14 @@ export function useExploreSearch({
                 setSearchError("Address resolved, but map geometry is missing for that tract.");
                 setSearchGeojson(null);
                 setMapMode("browse");
-                return;
+                return false;
               }
               setSearchGeojson(fc);
               setMapMode("search");
               clearViewport();
               setSearchZoomKey((k) => k + 1);
               setSuggestOpen(false);
-              return;
+              return true;
             }
             if (ar.census_tract_geoid != null || ar.message != null) {
               setSearchResults(null);
@@ -129,7 +111,7 @@ export function useExploreSearch({
                     ? `Census reports tract ${ar.census_tract_geoid}, but this app has no data for it yet.`
                     : "Address lookup did not return a tract in this app.")
               );
-              return;
+              return false;
             }
           } catch {
             /* Census geocoder or API error — fall through to text search */
@@ -144,7 +126,7 @@ export function useExploreSearch({
           setSearchResults(null);
           setSearchGeojson(null);
           setMapMode("browse");
-          return;
+          return false;
         }
         setSearchResults(r.results);
         const fc = await postMapTractsByGeoids(r.results.map((x) => x.geoid));
@@ -154,17 +136,19 @@ export function useExploreSearch({
           );
           setSearchGeojson(null);
           setMapMode("browse");
-          return;
+          return false;
         }
         setSearchGeojson(fc);
         setMapMode("search");
         clearViewport();
         setSearchZoomKey((k) => k + 1);
         setSuggestOpen(false);
+        return true;
       } catch (err: unknown) {
         setSearchError(err instanceof Error ? err.message : "Search failed.");
         setSearchGeojson(null);
         setMapMode("browse");
+        return false;
       } finally {
         setSearchMapLoading(false);
       }
@@ -180,6 +164,35 @@ export function useExploreSearch({
       setSearchZoomKey,
     ]
   );
+
+  // If ?q= is an 11-digit GEOID on load, jump to tract profile once. Otherwise run a map search
+  // (so place queries like "Citrus Heights" with ?state=06 show hits on the map).
+  useEffect(() => {
+    if (!initialQ) return;
+    const t = initialQ.trim();
+    const isGeoid = /^\d{11}$/.test(t);
+    const key = `nh-explore-init-${isGeoid ? "g" : "m"}-${t}-${initialStateFips ?? ""}`;
+    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(key)) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (isGeoid) {
+          if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, "1");
+          if (!cancelled) router.replace(`/tract/${t}`);
+          return;
+        }
+        const ok = await runSearchOnMap(t, initialStateFips ?? undefined);
+        if (!cancelled && ok && typeof sessionStorage !== "undefined") {
+          sessionStorage.setItem(key, "1");
+        }
+      } catch {
+        /* stay on explore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialQ, initialStateFips, router, runSearchOnMap]);
 
   const clearSearch = useCallback(() => {
     setQ("");

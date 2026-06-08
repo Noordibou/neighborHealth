@@ -37,6 +37,7 @@ import { METRIC_LABELS, formatMetricValue } from "@/lib/metricDisplay";
 import { LINE_COLORS } from "@/lib/compareColors";
 import { RACE_SEGMENTS } from "@/lib/demographics";
 import { SCORE_THRESHOLDS } from "@/lib/constants";
+import { readCompareTray, writeCompareTray } from "@/lib/compareTray";
 
 /** Solid UI fill from compare chart hex (e.g. tract card swatch at 70% opacity). */
 function hexToRgba(hex: string, alpha: number): string {
@@ -242,6 +243,22 @@ function CompareInner() {
     setIndicatorSort("default");
   }, [raw]);
 
+  /** Restore compare from session tray when URL has fewer than two GEOIDs. */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const fromUrl = raw.split(",").map((g) => g.trim()).filter(Boolean);
+    if (fromUrl.length >= 2) return;
+    const tray = readCompareTray();
+    if (tray.length >= 2) {
+      router.replace(`/compare?geoids=${encodeURIComponent(tray.join(","))}`);
+    }
+  }, [raw, router]);
+
+  /** Keep session tray aligned with the loaded comparison (for global nav, explorer, etc.). */
+  useEffect(() => {
+    if (geoids.length >= 2) writeCompareTray(geoids);
+  }, [raw]);
+
   useEffect(() => {
     if (geoids.length < 2) {
       setData(null);
@@ -441,6 +458,7 @@ function CompareInner() {
   }, [geoids]);
 
   function setGeoids(next: string[]) {
+    writeCompareTray(next);
     const q = next.join(",");
     router.push(q ? `/compare?geoids=${encodeURIComponent(q)}` : `/compare`);
   }
@@ -503,7 +521,7 @@ function CompareInner() {
 
   return (
     <div className="min-h-screen bg-nh-cream text-nh-brown">
-      <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mx-auto max-w-6xl px-4 pt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link href="/explore" className="text-sm font-semibold text-nh-terracotta hover:underline">
             ← Back to map
@@ -591,18 +609,27 @@ function CompareInner() {
               {data.series.map((s, i) => {
                 const badge = compositeBadge(s as Record<string, number | string>);
                 const flag = badge != null && badge >= SCORE_THRESHOLDS.priorityBadge ? "Priority" : "Stable";
+                const gid = String(s.geoid);
                 return (
-                  <div key={String(s.geoid)} className="relative rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-sm">
+                  <div key={gid} className="relative rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-sm">
                     <button
                       type="button"
                       className="absolute right-3 top-3 text-nh-brown-muted hover:text-red-600"
-                      aria-label={`Remove ${s.geoid}`}
-                      onClick={() => removeGeoid(String(s.geoid))}
+                      aria-label={`Remove ${gid}`}
+                      onClick={() => removeGeoid(gid)}
                     >
                       ×
                     </button>
-                    <p className="pr-8 font-semibold text-nh-brown">{String(s.label ?? s.geoid)}</p>
-                    <p className="text-xs text-nh-brown-muted">{String(s.geoid)}</p>
+                    <Link
+                      href={`/tract/${gid}`}
+                      className="block pr-8 text-left outline-none ring-nh-terracotta/40 focus-visible:ring-2 focus-visible:ring-offset-2 rounded-lg -m-0.5 p-0.5"
+                    >
+                      <span className="block font-semibold text-nh-brown underline-offset-2 hover:text-nh-terracotta hover:underline">
+                        {String(s.label ?? gid)}
+                      </span>
+                      <span className="mt-0.5 block font-mono text-xs text-nh-brown-muted">{gid}</span>
+                      <span className="mt-2 block text-xs font-semibold text-nh-terracotta">Open tract profile →</span>
+                    </Link>
                     <div className="mt-4 flex items-end justify-between">
                       <div>
                         <p className="text-[10px] font-bold uppercase text-nh-brown-muted">Composite</p>
@@ -682,16 +709,34 @@ function CompareInner() {
                 </div>
               </div>
               <div className="overflow-x-auto rounded-2xl border border-nh-brown/10 bg-white shadow-sm">
-                <table className="min-w-[480px] border-collapse text-left text-sm">
+                <table className="w-full min-w-[480px] table-fixed border-collapse text-left text-sm">
+                  <colgroup>
+                    <col style={{ width: "22%" }} />
+                    {data.series.map((s) => (
+                      <col key={`col-${String(s.geoid)}`} style={{ width: `${78 / data.series.length}%` }} />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-nh-brown/10 bg-nh-cream/80">
                       <th className="px-4 py-3 font-semibold text-nh-brown">Indicator</th>
-                      {data.series.map((s) => (
-                        <th key={String(s.geoid)} className="min-w-[200px] px-4 py-3">
-                          <div className="font-semibold text-nh-brown">{String(s.label ?? s.geoid)}</div>
-                          <div className="text-xs font-normal text-nh-brown-muted">{String(s.geoid)}</div>
-                        </th>
-                      ))}
+                      {data.series.map((s) => {
+                        const gid = String(s.geoid);
+                        return (
+                          <th key={gid} className="min-w-0 px-4 py-3 align-bottom">
+                            <Link
+                              href={`/tract/${gid}`}
+                              className="block min-w-0 text-left outline-none ring-nh-terracotta/40 focus-visible:ring-2 focus-visible:ring-offset-1 rounded-md -m-0.5 p-0.5"
+                            >
+                              <span className="block truncate font-semibold text-nh-brown underline-offset-2 hover:text-nh-terracotta hover:underline">
+                                {String(s.label ?? gid)}
+                              </span>
+                              <span className="mt-0.5 block truncate font-mono text-xs font-normal text-nh-brown-muted">
+                                {gid}
+                              </span>
+                            </Link>
+                          </th>
+                        );
+                      })}
                     </tr>
                     <tr className="border-b border-nh-brown/10 bg-nh-cream/80">
                       <th className="px-4 pb-2 pt-0 text-left align-bottom" scope="row">
@@ -701,7 +746,7 @@ function CompareInner() {
                         <th
                           key={`median-legend-${String(s.geoid)}`}
                           scope="col"
-                          className="min-w-[200px] px-4 pb-2 pt-0 text-center text-[10px] font-medium leading-tight text-nh-brown-muted"
+                          className="min-w-0 px-4 pb-2 pt-0 text-center text-[10px] font-medium leading-tight text-nh-brown-muted"
                           title="Dashed line on each bar marks the 50th percentile nationally"
                         >
                           National median
@@ -712,14 +757,14 @@ function CompareInner() {
                   <tbody>
                     {sortedMetricKeys.map((k) => (
                       <tr key={k} className="border-b border-nh-brown/5">
-                        <td className="px-4 py-3 font-medium text-nh-brown-muted">{LABELS[k] ?? k}</td>
+                        <td className="min-w-0 px-4 py-3 font-medium text-nh-brown-muted">{LABELS[k] ?? k}</td>
                         {data.series.map((s) => {
                           const row = rawFor(String(s.geoid), k, data.raw_indicators);
                           const v = row?.value ?? null;
                           const pn = row?.percentile_national;
                           const w = nationalPercentileBarWidth(pn);
                           return (
-                            <td key={`${s.geoid}-${k}`} className="px-4 py-3">
+                            <td key={`${s.geoid}-${k}`} className="min-w-0 px-4 py-3">
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-nh-brown">{v != null ? formatMetricValue(k, v) : "—"}</span>
                                 <div className="relative h-2 w-full rounded-full bg-nh-sand">
@@ -761,14 +806,20 @@ function CompareInner() {
               </summary>
               <div className="px-0 pb-0 pt-0">
                 <div className="overflow-x-auto">
-                  <table className="min-w-full border-collapse text-left text-sm">
+                  <table className="w-full min-w-[480px] table-fixed border-collapse text-left text-sm">
+                    <colgroup>
+                      <col style={{ width: "22%" }} />
+                      {data.series.map((s) => (
+                        <col key={`pctx-${String(s.geoid)}`} style={{ width: `${78 / data.series.length}%` }} />
+                      ))}
+                    </colgroup>
                     <tbody>
                       <tr className="border-b border-nh-brown/5">
-                        <td className="px-4 py-3 font-medium text-nh-brown-muted">Median income</td>
+                        <td className="min-w-0 px-4 py-3 font-medium text-nh-brown-muted">Median income</td>
                         {data.series.map((s) => {
                           const entry = demographicsByGeoid[String(s.geoid)];
                           return (
-                            <td key={`inc-${s.geoid}`} className="min-w-[200px] px-4 py-3">
+                            <td key={`inc-${s.geoid}`} className="min-w-0 px-4 py-3">
                               {demographicsLoading ? (
                                 <div className="h-4 max-w-[100px] animate-pulse rounded bg-nh-sand" />
                               ) : entry?.status === "error" ? (
@@ -783,11 +834,11 @@ function CompareInner() {
                         })}
                       </tr>
                       <tr className="border-b border-nh-brown/5">
-                        <td className="px-4 py-3 font-medium text-nh-brown-muted">Non-English at home</td>
+                        <td className="min-w-0 px-4 py-3 font-medium text-nh-brown-muted">Non-English at home</td>
                         {data.series.map((s) => {
                           const entry = demographicsByGeoid[String(s.geoid)];
                           return (
-                            <td key={`ne-${s.geoid}`} className="min-w-[200px] px-4 py-3">
+                            <td key={`ne-${s.geoid}`} className="min-w-0 px-4 py-3">
                               {demographicsLoading ? (
                                 <div className="h-4 max-w-[72px] animate-pulse rounded bg-nh-sand" />
                               ) : entry?.status === "error" ? (
@@ -802,12 +853,12 @@ function CompareInner() {
                         })}
                       </tr>
                       <tr className="border-b border-nh-brown/5">
-                        <td className="px-4 py-3 font-medium text-nh-brown-muted">Race / ethnicity</td>
+                        <td className="min-w-0 px-4 py-3 font-medium text-nh-brown-muted">Race / ethnicity</td>
                         {data.series.map((s) => {
                           const entry = demographicsByGeoid[String(s.geoid)];
                           const d = entry?.status === "ready" ? entry.data : undefined;
                           return (
-                            <td key={`race-${s.geoid}`} className="min-w-[200px] px-4 py-3">
+                            <td key={`race-${s.geoid}`} className="min-w-0 px-4 py-3">
                               {demographicsLoading ? (
                                 <div className="space-y-2">
                                   <div className="h-2 w-full max-w-[200px] animate-pulse rounded-sm bg-nh-sand" />
@@ -843,9 +894,9 @@ function CompareInner() {
             </div>
           </>
         )}
-        <div className="mt-14">
-          <SiteFooter />
-        </div>
+      </div>
+      <div className="mt-14">
+        <SiteFooter />
       </div>
     </div>
   );

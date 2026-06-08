@@ -20,6 +20,20 @@ export const BIVARIATE_COLORS: Record<string, string> = {
 };
 
 /**
+ * 3×3 legend / matrix layout matching `nh_bivariate_class` (`${housing}-${health}`).
+ * - Rows top → bottom: housing stress tertile **high (3) → low (1)**.
+ * - Columns left → right: health burden tertile **low (1) → high (3)**.
+ */
+export const BIVARIATE_LEGEND_GRID_ROWS: readonly [string, string, string][] = [
+  ["3-1", "3-2", "3-3"],
+  ["2-1", "2-2", "2-3"],
+  ["1-1", "1-2", "1-3"],
+];
+
+/** Flat cell order for CSS `grid-cols-3` (row-major, same as {@link BIVARIATE_LEGEND_GRID_ROWS}). */
+export const BIVARIATE_LEGEND_CELL_ORDER: readonly string[] = BIVARIATE_LEGEND_GRID_ROWS.flat();
+
+/**
  * Minimum number of component-score metrics that must be non-null to produce a
  * blend value.  Tracts with fewer available metrics return null (no-data fill).
  * Requiring 2-of-3 prevents a single metric from masquerading as a full blend.

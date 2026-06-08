@@ -6,9 +6,9 @@ import type { MutableRefObject, ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { Layer, Source, type MapRef } from "react-map-gl/maplibre";
 import type { Map as MapLibreMap, MapLayerMouseEvent } from "maplibre-gl";
-import { BIVARIATE_COLORS } from "@/lib/mapGeojson";
+import { BIVARIATE_COLORS, BIVARIATE_LEGEND_CELL_ORDER } from "@/lib/mapGeojson";
 import { getExploreBrowsePlaceholderView, getExploreUsOverviewView } from "@/lib/exploreMapPlaceholder";
-import { STATE_FIPS_TO_POSTAL } from "@/lib/geo";
+import { formatTractHoverLocation, statePostalFromFips } from "@/lib/formatTractHoverLabel";
 import type { ExploreLayerMode } from "@/types";
 
 // MapLibre GL 4.x requires an explicit worker URL in bundled/Next.js environments.
@@ -49,12 +49,6 @@ const METRICS = [
   { id: "mental_health_pct", label: "Mental health" },
   { id: "heat_index", label: "Heat index (proxy)" },
 ] as const;
-
-function statePostalFromFips(fips: string | null | undefined): string | null {
-  if (fips == null || typeof fips !== "string") return null;
-  const k = fips.padStart(2, "0").slice(0, 2);
-  return STATE_FIPS_TO_POSTAL[k] ?? null;
-}
 
 function strProp(p: Record<string, unknown>, k: string): string | null {
   const v = p[k];
@@ -106,35 +100,6 @@ function propsToHover(p: Record<string, unknown> | null | undefined): HoverInfo 
     uninsured_pct: numProp(p, "uninsured_pct"),
     asthma_pct: numProp(p, "asthma_pct"),
   };
-}
-
-function formatHoverLocation(h: HoverInfo): { headline: string; subline: string | null } {
-  const st = h.state_postal;
-  const countyWithSt =
-    h.county_name && st ? `${h.county_name}, ${st}` : h.county_name ?? (st ? st : null);
-
-  if (h.place_name) {
-    const parts: string[] = [];
-    if (h.name) parts.push(h.name);
-    if (countyWithSt) parts.push(countyWithSt);
-    const sub = parts.length ? parts.join(" · ") : null;
-    return { headline: h.place_name, subline: sub };
-  }
-
-  if (countyWithSt) {
-    const sub = h.name && h.name !== countyWithSt ? h.name : null;
-    return { headline: countyWithSt, subline: sub };
-  }
-
-  if (h.name) {
-    return { headline: h.name, subline: st ? st : null };
-  }
-
-  if (st) {
-    return { headline: `Census tract · ${st}`, subline: null };
-  }
-
-  return { headline: "Census tract", subline: null };
 }
 
 function hoverHasShownMetrics(h: HoverInfo): boolean {
@@ -827,7 +792,12 @@ function NeighborMapInner({
   const hoverLegend =
     hoverCard && hasTracts ? (() => {
       const { info } = hoverCard;
-      const { headline, subline } = formatHoverLocation(info);
+      const { headline, subline } = formatTractHoverLocation({
+        name: info.name,
+        place_name: info.place_name,
+        county_name: info.county_name,
+        statePostal: info.state_postal,
+      });
       const hasMetrics = hoverHasShownMetrics(info);
       return (
         <div
@@ -941,8 +911,9 @@ function NeighborMapInner({
               only among tracts on this map.
             </p>
             <p className="mt-2 border-t border-nh-brown/10 pt-2 text-nh-brown-muted">
-              Matrix: columns = housing stress (low → high), rows = health burden (low at bottom, high at top). The
-              3×3 grid matches the map colors.
+              Matrix matches map fill: each cell is <span className="font-mono text-nh-brown">housing–health</span>{" "}
+              tertiles. <strong>Columns</strong> left → right: health burden low → high. <strong>Rows</strong> top →
+              bottom: housing stress high → low (same order as the 3×3 color grid).
             </p>
           </div>
         ) : null}
@@ -967,7 +938,7 @@ function NeighborMapInner({
           className="mt-2 grid w-[4.5rem] shrink-0 grid-cols-3 gap-0.5 self-start rounded border border-nh-brown/10 p-0.5"
           aria-label="Bivariate color key"
         >
-          {(["3-1", "3-2", "3-3", "2-1", "2-2", "2-3", "1-1", "1-2", "1-3"] as const).map((cell) => (
+          {BIVARIATE_LEGEND_CELL_ORDER.map((cell) => (
             <div
               key={cell}
               className="aspect-square rounded-[1px]"
@@ -976,6 +947,9 @@ function NeighborMapInner({
             />
           ))}
         </div>
+        <p className="mt-0.5 w-[4.5rem] text-center text-[8px] leading-tight text-nh-brown-muted">
+          ↑ Housing stress · health burden →
+        </p>
         <div className="mt-2 flex shrink-0 items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
           <span
             className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border border-orange-400/70 shadow-sm"
@@ -1218,7 +1192,7 @@ function NeighborMapInner({
           </div>
         ) : null}
         {rightLegend ? (
-          <div className="pointer-events-none absolute right-3 top-3 z-10 overflow-visible">
+          <div className="pointer-events-none absolute right-3 top-28 z-10 overflow-visible lg:top-3">
             <div className="pointer-events-auto">{rightLegend}</div>
           </div>
         ) : null}

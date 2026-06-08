@@ -39,7 +39,7 @@ export default async function TractPage({ params }: Props) {
   if (!tract) {
     return (
       <div className="flex min-h-screen flex-col bg-nh-cream text-nh-brown">
-        <div className="mx-auto max-w-3xl flex-1 px-4 py-12">
+        <div className="mx-auto max-w-3xl flex-1 px-4 py-6 ">
           <TractMapBackControl />
           <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
             <h1 className="font-display text-2xl font-semibold text-nh-brown">Tract profile unavailable</h1>
@@ -58,8 +58,8 @@ export default async function TractPage({ params }: Props) {
             </p>
           </div>
         </div>
-        <SiteFooter />
-      </div>
+      <SiteFooter />
+    </div>
     );
   }
 
@@ -75,7 +75,7 @@ export default async function TractPage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-nh-cream text-nh-brown">
-      <div className="mx-auto max-w-6xl px-4 pt-12">
+      <div className="mx-auto max-w-6xl px-4 py-6">
         <TractMapBackControl />
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -185,9 +185,8 @@ export default async function TractPage({ params }: Props) {
             NeighborHealth composite methodology. See repository documentation for vintages and limitations.
           </p>
         </section>
-
-        <SiteFooter />
       </div>
+      <SiteFooter />
     </div>
   );
 }

@@ -7,7 +7,7 @@ export default function LandingPage() {
       <section className="border-b border-nh-brown/10">
         <div className="mx-auto grid max-w-7xl gap-12 px-4 py-14 md:grid-cols-2 md:items-center md:py-20">
           <div>
-            <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight text-nh-brown sm:text-4xl md:text-5xl">
+            <h1 className="font-display lg:text-3xl font-semibold leading-tight tracking-tight text-nh-brown text-4xl md:text-5xl">
               Find where housing stress and{" "}
               <span className="text-nh-terracotta italic">health risk overlap.</span>
             </h1>
@@ -16,7 +16,7 @@ export default function LandingPage() {
               prioritization index so outreach teams, health departments, and grant writers can see where to focus first.
             </p>
             <form action="/explore" method="get" className="mt-8">
-              <div className="flex flex-col gap-2 rounded-2xl border border-nh-brown/10 bg-white p-1.5 shadow-sm sm:flex-row sm:items-center">
+              <div className="flex gap-2 rounded-2xl border border-nh-brown/10 bg-white p-1.5 shadow-sm flex-row items-center">
                 <div className="relative flex min-w-0 flex-1 items-center pl-3">
                   <svg className="h-5 w-5 shrink-0 text-nh-brown-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -38,17 +38,39 @@ export default function LandingPage() {
             </form>
             <p className="mt-4 flex flex-wrap items-center gap-2 text-sm text-nh-brown-muted">
               <span className="font-semibold uppercase tracking-wide text-nh-brown/50">Try:</span>
-              {["Philadelphia, PA", "19134", "Tract 42101018800", "Kensington"].map((t) => (
-                <Link
-                  key={t}
-                  href={`/explore?q=${encodeURIComponent(t)}`}
-                  className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown transition hover:border-nh-terracotta hover:text-nh-terracotta"
-                >
-                  {t}
-                </Link>
-              ))}
+              {(
+                [
+                  { label: "Tract ID 17175951400", q: "17175951400" },
+                  { label: "Citrus Heights, CA", q: "Citrus Heights", state: "06" },
+                  { label: "Texas", href: "/explore?state=48" },
+                ] as const
+              ).map((item) => {
+                if ("q" in item) {
+                  const params = new URLSearchParams();
+                  params.set("q", item.q);
+                  if ("state" in item && item.state) params.set("state", item.state);
+                  return (
+                    <Link
+                      key={`${item.q}-${"state" in item ? item.state : ""}`}
+                      href={`/explore?${params.toString()}`}
+                      className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown transition hover:border-nh-terracotta hover:text-nh-terracotta"
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                }
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown transition hover:border-nh-terracotta hover:text-nh-terracotta"
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
             </p>
-            <dl className="mt-10 grid grid-cols-2 gap-6 sm:grid-cols-4">
+            <dl className="mt-10 grid gap-8 grid-cols-4">
               {[
                 { k: "Tracts scored", v: "~28,000" },
                 { k: "Indicators", v: "18" },
@@ -121,11 +143,11 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section id="methodology" className="border-t border-nh-brown/10 bg-white/60 py-16">
+      <section id="methodology" className="scroll-mt-28 border-t border-nh-brown/10 bg-white/60 py-16">
         <div className="mx-auto max-w-7xl px-4">
           <p className="text-xs font-bold uppercase tracking-widest text-nh-terracotta">Methodology</p>
           <h2 className="mt-2 font-display text-2xl font-semibold text-nh-brown md:text-3xl">How the index is built.</h2>
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-nh-brown-muted">
+          <p className="mt-4 text-sm leading-relaxed text-nh-brown-muted">
             Each tract receives a 0–100 score from publicly available housing and health indicators. We percentile-rank
             metrics within the comparison cohort, apply domain-informed weights, and surface the blend on the map and in
             exports.
@@ -154,6 +176,25 @@ export default function LandingPage() {
                 <p className="mt-2 text-sm leading-relaxed text-nh-brown-muted">{s.d}</p>
               </div>
             ))}
+          </div>
+          <div className="mt-14 scroll-mt-28 border-t border-nh-brown/10 pt-12" id="sources">
+            <p className="text-xs font-bold uppercase tracking-widest text-nh-terracotta">Data sources</p>
+            <p className="mt-2  text-sm leading-relaxed text-nh-brown-muted">
+              Indicators come from public federal datasets. See each tract profile for citations; vintages match the
+              ingest year (ACS 5-year and CDC PLACES release noted in exports).
+            </p>
+            <ul className="mt-6 grid gap-3 text-sm text-nh-brown grid-cols-2 lg:grid-cols-3 ">
+              {["CDC PLACES (tract health estimates)", "U.S. Census ACS (housing & demographics)", "HRSA (FQHC sites)"].map(
+                (item) => (
+                  <li
+                    key={item}
+                    className="rounded-xl border border-nh-brown/10 bg-white/80 px-4 py-3 text-nh-brown-muted shadow-sm"
+                  >
+                    {item}
+                  </li>
+                )
+              )}
+            </ul>
           </div>
         </div>
       </section>

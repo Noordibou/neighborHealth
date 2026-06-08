@@ -2,6 +2,27 @@
 
 export const COMPARE_TRAY_KEY = "nh-compare-tray";
 
+/** Fired on `window` after `writeCompareTray` so nav can refresh Compare href (same-tab sessionStorage is otherwise invisible). */
+export const NH_COMPARE_TRAY_EVENT = "nh-compare-tray-update";
+
+function notifyCompareTrayListeners(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(NH_COMPARE_TRAY_EVENT));
+}
+
+/** Href for global Compare nav: current compare URL when on `/compare`, else session tray when ≥2 GEOIDs. */
+export function getCompareNavHref(pathname: string | null | undefined): string {
+  if (typeof window === "undefined") return "/compare";
+  if (pathname === "/compare") {
+    const raw = new URLSearchParams(window.location.search).get("geoids") ?? "";
+    const gs = raw.split(",").map((g) => g.trim()).filter(Boolean);
+    if (gs.length >= 2) return `/compare?geoids=${encodeURIComponent(raw)}`;
+  }
+  const tray = readCompareTray();
+  if (tray.length >= 2) return `/compare?geoids=${encodeURIComponent(tray.join(","))}`;
+  return "/compare";
+}
+
 export function readCompareTray(): string[] {
   if (typeof window === "undefined") return [];
   try {
@@ -30,6 +51,7 @@ export function writeCompareTray(geoids: string[]): void {
   try {
     const next = geoids.slice(0, 4);
     sessionStorage.setItem(COMPARE_TRAY_KEY, JSON.stringify(next));
+    notifyCompareTrayListeners();
   } catch {
     /* ignore */
   }

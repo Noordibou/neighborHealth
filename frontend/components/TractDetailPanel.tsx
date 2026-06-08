@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { TractDetail } from "@/types";
 import { METRIC_LABELS } from "@/lib/metricDisplay";
+import { formatTractHoverLocation, statePostalFromFips } from "@/lib/formatTractHoverLabel";
 
 const SIDEBAR_METRIC_KEYS = [
   "rent_burden_pct",
@@ -47,19 +48,24 @@ export function TractDetailPanel({
 }) {
   if (!tract) return null;
 
+  const statePostal = statePostalFromFips(tract.state_fips);
+  const { headline, subline } = formatTractHoverLocation({
+    name: tract.name,
+    place_name: tract.place_name,
+    county_name: tract.county_name,
+    statePostal,
+  });
+
   return (
     <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] p-4 shadow-sm">
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8e8e8e]">Selected tract</p>
       <div className="mt-3 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="font-display text-xl font-bold leading-tight text-[#2d2d2d]">
-            {tract.name ?? `Tract ${tract.geoid}`}
-          </h3>
-          <p className="mt-1 text-sm text-[#6b6560]">
-            <span className="font-mono text-[13px]">{tract.geoid}</span>
-            <span className="text-[#c4bcb4]"> · </span>
-            {tract.place_name ?? tract.county_name ?? "—"}
-          </p>
+          <h3 className="font-display text-xl font-bold leading-tight text-[#2d2d2d]">{headline}</h3>
+          {subline ? (
+            <p className="mt-1 break-words text-sm text-[#6b6560]">{subline}</p>
+          ) : null}
+          <p className="mt-1 font-mono text-[13px] text-[#6b6560]">Tract ID {tract.geoid}</p>
         </div>
         <div className="shrink-0 text-right">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">Index</p>
@@ -71,10 +77,10 @@ export function TractDetailPanel({
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2">
         <Link
           href={`/tract/${tract.geoid}`}
-          className="flex min-w-0 flex-1 basis-[calc(50%-0.25rem)] items-center justify-center rounded-full bg-[#b34d3a] px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-[#9a4131]"
+          className="flex h-10 min-w-0 items-center justify-center whitespace-nowrap rounded-full bg-[#b34d3a] lg:px-2 text-center lg:text-xs font-semibold text-white shadow-sm hover:bg-[#9a4131] px-3 text-sm"
         >
           View profile →
         </Link>
@@ -82,7 +88,7 @@ export function TractDetailPanel({
           type="button"
           onClick={onAddToCompare}
           disabled={isInCompare || compareDisabled}
-          className={`flex min-w-0 flex-1 basis-[calc(50%-0.25rem)] items-center justify-center rounded-full border-2 px-4 py-2.5 text-sm font-semibold shadow-sm transition disabled:opacity-40 ${
+          className={`flex h-10 min-w-0 items-center justify-center whitespace-nowrap rounded-full border-2 lg:px-2 text-center lg:text-xs font-semibold shadow-sm transition disabled:opacity-40 px-3 text-sm ${
             isInCompare
               ? "border-[#b34d3a] bg-white text-[#b34d3a]"
               : "border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/40"

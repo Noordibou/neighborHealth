@@ -378,7 +378,7 @@ export function TopTractsPanel({
       </div>
 
       <ul className="max-h-[min(52vh,28rem)] divide-y divide-[#ebe6df] overflow-y-auto overscroll-contain">
-        {ranked.slice(0, 16).map((r, idx) => {
+        {ranked.slice(0, 16).map((r) => {
           const label = r.name ?? `Tract ${r.geoid}`;
           const inTray = compareTray.includes(r.geoid);
           const isSel = selectedGeoid === r.geoid;
@@ -402,9 +402,6 @@ export function TopTractsPanel({
               key={r.geoid}
               className={`flex items-center gap-2 px-3 py-2.5 transition ${isSel ? "bg-[#f6e9e4]" : "hover:bg-[#faf6f0]"}`}
             >
-              <span className="w-7 shrink-0 text-[11px] tabular-nums text-[#8e8e8e]">
-                {String(idx + 1).padStart(2, "0")}
-              </span>
               <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums ${scoreTone}`}>
                 {scoreDisplay}
               </span>
@@ -418,7 +415,7 @@ export function TopTractsPanel({
                 onClick={() =>
                   setCompareTray(inTray ? removeFromCompareTray(r.geoid) : addToCompareTray(r.geoid))
                 }
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-base font-semibold transition ${
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-semibold leading-none transition ${
                   inTray
                     ? "bg-[#b34d3a] text-white shadow-sm"
                     : "border border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/50"

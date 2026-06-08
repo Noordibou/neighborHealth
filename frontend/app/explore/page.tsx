@@ -39,6 +39,8 @@ import { SCORE_THRESHOLDS } from "@/lib/constants";
 import { parseExploreUrl, useExploreUrlSync } from "./useExploreUrlSync";
 import { useExploreSearch } from "./useExploreSearch";
 
+const EXPLORE_LEFT_ASIDE_COLLAPSED_KEY = "nh-explore-left-aside-collapsed";
+
 function mapFillLabel(mode: ExploreLayerMode): string {
   if (mode === "composite") return "Composite risk (0–100)";
   if (mode === "housing") return "Housing stress blend";
@@ -84,6 +86,9 @@ function ExploreInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const initialQ = sp.get("q")?.trim() ?? "";
+  const rawStateParam = sp.get("state")?.trim();
+  const initialStateFips =
+    rawStateParam && /^\d{1,2}$/.test(rawStateParam) ? rawStateParam.padStart(2, "0").slice(0, 2) : null;
 
   const [stateFips, setStateFips] = useState<string | null>(null);
   const [geojson, setGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
@@ -112,6 +117,14 @@ function ExploreInner() {
   const [shareHint, setShareHint] = useState<string | null>(null);
   const [availableStates, setAvailableStates] = useState<StateSummary[]>([]);
   const [usStatesGeojson, setUsStatesGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [leftAsideCollapsed, setLeftAsideCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.sessionStorage.getItem(EXPLORE_LEFT_ASIDE_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const [draft, setDraft] = useState({
     minScore: 0,
@@ -186,6 +199,7 @@ function ExploreInner() {
     onPickSuggestion,
   } = useExploreSearch({
     initialQ,
+    initialStateFips,
     clearViewport,
     onSelectState: (fips) => {
       clearSearchMap();
@@ -204,6 +218,14 @@ function ExploreInner() {
     clearSearchFields();
     clearSearchMap();
   }, [clearSearchFields, clearSearchMap]);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(EXPLORE_LEFT_ASIDE_COLLAPSED_KEY, leftAsideCollapsed ? "1" : "0");
+    } catch {
+      /* private mode / quota */
+    }
+  }, [leftAsideCollapsed]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -560,7 +582,7 @@ function ExploreInner() {
               href="/#methodology"
               className="text-sm font-medium text-nh-brown-muted hover:text-nh-brown"
             >
-              Methodology
+              Methods & data
             </Link>
             <a
               href={`${API_BASE}/api/export/tracts.csv${stateFips ? `?state=${stateFips}` : ""}`}
@@ -585,9 +607,28 @@ function ExploreInner() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col pb-0 md:flex-row md:pb-16">
-        <aside className="hidden min-h-0 shrink-0 flex-col overflow-hidden border-nh-brown/10 md:flex md:h-full md:w-[360px] md:border-r md:bg-white/90">
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="flex min-h-0 flex-1 flex-col pb-0 lg:flex-row lg:pb-16">
+        {!leftAsideCollapsed ? (
+          <aside className="hidden min-h-0 shrink-0 flex-col overflow-hidden border-nh-brown/10 bg-white/90 lg:flex lg:h-full lg:w-[300px] lg:border-r">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex shrink-0 items-center justify-between gap-1 border-b border-nh-brown/10 bg-nh-cream/70 px-2 py-1.5">
+                <span className="min-w-0 flex-1 truncate px-1 text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">
+                  Search & results
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLeftAsideCollapsed(true)}
+                  className="shrink-0 rounded-lg p-2 text-nh-brown-muted hover:bg-white hover:text-nh-brown"
+                  aria-label="Collapse search panel"
+                  aria-expanded={true}
+                  title="Hide search panel"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
             <section className="rounded-xl border border-nh-brown/10 bg-nh-cream/40 p-3 shadow-sm">
               <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Search</p>
               <form onSubmit={onSearchSubmit} className="mt-2 space-y-2">
@@ -740,17 +781,34 @@ function ExploreInner() {
                 </>
               ) : null}
             </section>
-          </div>
-        </aside>
+              </div>
+            </div>
+          </aside>
+        ) : null}
 
-        <div className={`relative flex min-w-0 flex-col md:min-h-0 md:flex-1 md:px-4 md:pt-2 ${mobileMode === "list" ? "h-[35dvh] shrink-0" : "min-h-0 flex-1"}`}>
+        <div
+          className={`relative flex min-w-0 flex-col lg:min-h-0 lg:flex-1 lg:px-4 lg:pt-2 p-1 lg:p-0  ${mobileMode === "list" ? "h-[35dvh] shrink-0" : "min-h-0 flex-1"}`}
+        >
+          {leftAsideCollapsed ? (
+            <button
+              type="button"
+              onClick={() => setLeftAsideCollapsed(false)}
+              className="pointer-events-auto absolute left-0 top-32 z-30 hidden rounded-r-lg border border-nh-brown/15 border-l-0 bg-white/95 py-2.5 pl-1.5 pr-2 text-nh-brown shadow-md hover:bg-white lg:block"
+              aria-label="Expand search panel"
+              title="Show search panel"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          ) : null}
           {exploreDataStatus.stateCount > 0 ? (
-            <p className="mb-1.5 hidden text-[10px] leading-snug text-nh-brown-muted md:block">
+            <p className="mb-1.5 hidden text-[10px] leading-snug text-nh-brown-muted lg:block">
               Data: ACS 2022 · {exploreDataStatus.total.toLocaleString()} tracts across{" "}
               {exploreDataStatus.stateCount} states
             </p>
           ) : null}
-          <div className="mb-2 hidden items-center justify-between gap-3 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted md:flex md:flex-wrap">
+          <div className="mb-2 hidden items-center justify-between gap-3 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted lg:flex lg:flex-wrap">
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-nh-brown-muted">
                 Layer
@@ -807,7 +865,7 @@ function ExploreInner() {
                   <button
                     type="button"
                     onClick={clearSearchMap}
-                    className="absolute right-4 top-4 z-20 rounded-lg border border-nh-brown/15 bg-white/95 px-3 py-1.5 text-xs font-semibold text-nh-brown shadow hover:bg-white"
+                    className="absolute left-3 top-28 z-20 rounded-lg border border-nh-brown/15 bg-white/95 px-3 py-1.5 text-xs font-semibold text-nh-brown shadow hover:bg-white lg:left-4 lg:top-4"
                   >
                     Exit search map
                   </button>
@@ -913,7 +971,7 @@ function ExploreInner() {
             <button
               type="button"
               onClick={() => setMobileSearchOpen(true)}
-              className="absolute left-4 right-4 top-3 z-30 flex h-12 items-center gap-3 rounded-full border border-nh-brown/10 bg-white px-4 shadow-lg md:hidden"
+              className="absolute left-4 right-4 top-3 z-30 flex h-12 items-center gap-3 rounded-full border border-nh-brown/10 bg-white px-4 shadow-lg lg:hidden"
             >
               <svg className="h-4 w-4 shrink-0 text-nh-brown-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -928,7 +986,7 @@ function ExploreInner() {
           )}
 
           {/* Mobile: compact layer tab strip */}
-          <div className="absolute left-0 right-0 z-20 flex overflow-x-auto md:hidden" style={{ top: mobileMode === "map" ? "3.75rem" : "0.5rem" }}>
+          <div className="absolute left-0 right-0 z-20 flex overflow-x-auto lg:hidden" style={{ top: mobileMode === "map" ? "3.75rem" : "0.5rem" }}>
             <div className="flex shrink-0 gap-1 px-3 pb-1.5 pt-1">
               {layerTabs.map((t) => (
                 <button
@@ -947,46 +1005,104 @@ function ExploreInner() {
             </div>
           </div>
 
-          {/* Mobile: "Show rankings" (map mode) / "Back to map" (list mode) */}
-          <div className="absolute bottom-14 left-0 right-0 z-20 flex justify-center md:hidden">
-            {mobileMode === "map" ? (
-              <button
-                type="button"
-                onClick={() => setMobileMode("list")}
-                className="flex items-center gap-2 rounded-full bg-nh-brown/90 px-5 py-3 text-sm font-semibold text-nh-cream shadow-lg backdrop-blur-sm"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-                Rankings{rankedForTray.length > 0 ? ` (${rankedForTray.length}+)` : stateFips ? "" : ""}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setMobileMode("map")}
-                className="rounded-full border border-nh-brown/15 bg-white/95 px-4 py-2 text-xs font-semibold text-nh-brown shadow"
-              >
-                ← Map view
-              </button>
-            )}
+          {/* Mobile: Rankings + Compare — on map pane */}
+          <div className="pointer-events-none absolute bottom-12 right-2 z-30 flex flex-col items-end gap-0 lg:hidden">
+            <div className="pointer-events-auto flex max-w-[min(20rem,calc(100%-0.5rem))] flex-col items-end gap-1 pr-[max(0rem,env(safe-area-inset-right,0px))] pb-[max(0rem,env(safe-area-inset-bottom,0px))]">
+              {mobileMode === "map" ? (
+                <button
+                  type="button"
+                  onClick={() => setMobileMode("list")}
+                  className="inline-flex shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-full bg-nh-brown/90 px-4 py-2.5 text-sm font-semibold leading-none text-nh-cream shadow-lg backdrop-blur-sm transition-colors hover:bg-nh-brown"
+                >
+                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                  <span className="whitespace-nowrap">
+                    Rankings{rankedForTray.length > 0 ? ` (${rankedForTray.length}+)` : stateFips ? "" : ""}
+                  </span>
+                </button>
+              ) : null}
+              {compareTray.length > 0 && mobileTrayExpanded ? (
+                <div className="w-full min-w-[16rem] rounded-2xl border border-nh-brown/10 bg-white p-3 shadow-2xl">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Compare tray</p>
+                    <button
+                      type="button"
+                      onClick={() => setMobileTrayExpanded(false)}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-nh-brown/15 bg-nh-sand/70 text-nh-brown/75 shadow-sm transition-colors hover:border-nh-brown/20 hover:bg-nh-sand hover:text-nh-brown"
+                      aria-label="Close"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {compareTray.map((g) => {
+                      const row = rankedForTray.find((x) => x.geoid === g);
+                      return (
+                        <div key={g} className="flex items-center gap-2 rounded-lg border border-nh-brown/15 bg-nh-cream px-2 py-2 text-sm">
+                          <span className="min-w-0 flex-1 truncate font-medium text-nh-brown">{row?.name ?? g}</span>
+                          <button
+                            type="button"
+                            className="shrink-0 text-nh-brown-muted hover:text-red-600"
+                            aria-label="Remove"
+                            onClick={() => setCompareTray(removeFromCompareTray(g))}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={compareTray.length < 2}
+                    onClick={() => router.push(`/compare?geoids=${encodeURIComponent(compareTray.join(","))}`)}
+                    className="mt-2 w-full rounded-full bg-nh-brown py-2 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Open compare →
+                  </button>
+                </div>
+              ) : null}
+              {compareTray.length > 0 && !mobileTrayExpanded ? (
+                <button
+                  type="button"
+                  onClick={() => setMobileTrayExpanded(true)}
+                  className="inline-flex shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-full bg-nh-brown px-4 py-2.5 text-sm font-semibold leading-none text-nh-cream shadow-lg transition-colors hover:bg-nh-brown/90"
+                >
+                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <span className="whitespace-nowrap">Compare ({compareTray.length})</span>
+                </button>
+              ) : null}
+            </div>
           </div>
+
         </div>
 
-        <aside className={`min-h-0 flex-col overflow-hidden border-[#e8e3dc] bg-[#faf8f5] md:flex md:flex-none md:h-full md:w-[380px] md:border-l ${mobileMode === "list" ? "flex flex-1" : "hidden"}`}>
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-            {/* Mobile list mode: back to map button */}
-            <div className="mb-1 md:hidden">
-              <button
-                type="button"
-                onClick={() => setMobileMode("map")}
-                className="flex items-center gap-1.5 text-sm font-semibold text-nh-terracotta"
-              >
-                ← Back to map
-              </button>
+        <aside className={`min-h-0 flex-col overflow-hidden border-[#e8e3dc] bg-[#faf8f5] lg:flex lg:flex-none lg:h-full lg:w-[300px] lg:border-l ${mobileMode === "list" ? "flex flex-1" : "hidden"}`}>
+          {mobileMode === "list" ? (
+            <div className="shrink-0 border-b border-nh-brown/10 p-3 lg:hidden">
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-nh-brown/10 bg-white px-3 py-2.5 shadow-sm">
+                <p className="min-w-0 text-sm font-semibold text-nh-brown">Tract rankings</p>
+                <button
+                  type="button"
+                  onClick={() => setMobileMode("map")}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-nh-brown/15 bg-nh-sand/70 text-nh-brown/75 shadow-sm transition-colors hover:border-nh-brown/20 hover:bg-nh-sand hover:text-nh-brown"
+                  aria-label="Close rankings"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
-
+          ) : null}
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
             {/* TractDetailPanel — desktop sidebar only; mobile uses the bottom sheet */}
-            <div className="hidden md:block">
+            <div className="hidden lg:block">
               <div>
                 {!selectedGeoid && !stateFips && (
                   <div className="rounded-xl border border-nh-brown/10 bg-nh-cream/50 p-4">
@@ -1039,9 +1155,9 @@ function ExploreInner() {
         </aside>
       </div>
 
-      {/* Desktop compare tray — full bar at bottom (md+) */}
-      <div className="hidden md:block fixed bottom-0 left-0 right-0 z-40 border-t border-nh-brown/10 bg-nh-cream/95 px-4 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] pt-2.5 shadow-[0_-8px_24px_rgba(44,24,16,0.08)] backdrop-blur-md md:py-3">
-        <div className="mx-auto flex max-w-[1920px] flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      {/* Desktop compare tray — full bar at bottom (lg+) */}
+      <div className="hidden lg:block fixed bottom-0 left-0 right-0 z-40 border-t border-nh-brown/10 bg-nh-cream/95 px-4 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] pt-2.5 shadow-[0_-8px_24px_rgba(44,24,16,0.08)] backdrop-blur-md lg:py-3">
+        <div className="mx-auto flex max-w-[1920px] flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-nh-brown-muted">Compare tray</p>
             <p className="text-xs text-nh-brown-muted">
@@ -1085,72 +1201,14 @@ function ExploreInner() {
         </div>
       </div>
 
-      {/* Mobile compact compare tray pill */}
-      {compareTray.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-40 md:hidden">
-          {mobileTrayExpanded ? (
-            <div className="w-[calc(100vw-2rem)] max-w-[320px] rounded-2xl border border-nh-brown/10 bg-white p-4 shadow-2xl">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-xs font-bold uppercase tracking-wide text-nh-brown-muted">Compare tray</p>
-                <button
-                  type="button"
-                  onClick={() => setMobileTrayExpanded(false)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-nh-brown-muted hover:bg-nh-sand"
-                  aria-label="Close"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="space-y-2">
-                {compareTray.map((g) => {
-                  const row = rankedForTray.find((x) => x.geoid === g);
-                  return (
-                    <div key={g} className="flex items-center gap-2 rounded-lg border border-nh-brown/15 bg-nh-cream px-3 py-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate font-medium text-nh-brown">{row?.name ?? g}</span>
-                      <button
-                        type="button"
-                        className="shrink-0 text-nh-brown-muted hover:text-red-600"
-                        aria-label="Remove"
-                        onClick={() => setCompareTray(removeFromCompareTray(g))}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                disabled={compareTray.length < 2}
-                onClick={() => router.push(`/compare?geoids=${encodeURIComponent(compareTray.join(","))}`)}
-                className="mt-3 w-full rounded-full bg-nh-brown py-2.5 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Open compare →
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setMobileTrayExpanded(true)}
-              className="flex items-center gap-2 rounded-full bg-nh-brown px-5 py-3 text-sm font-semibold text-nh-cream shadow-lg"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              Compare ({compareTray.length})
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Mobile bottom sheet: selected tract detail */}
       {selectedGeoid && !mobileSheetDismissed && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[60dvh] min-h-[44dvh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl md:hidden">
+        <div className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[60dvh] min-h-[44dvh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl lg:hidden">
           <div className="relative flex shrink-0 items-center justify-center px-4 pt-3 pb-1">
             <div className="h-1 w-8 rounded-full bg-nh-sand" />
             <button
               type="button"
-              className="absolute right-4 top-3 flex h-8 w-8 items-center justify-center rounded-full text-nh-brown-muted hover:bg-nh-sand"
+              className="absolute right-4 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-nh-brown/15 bg-nh-sand/70 text-nh-brown/75 shadow-sm hover:border-nh-brown/20 hover:bg-nh-sand hover:text-nh-brown"
               aria-label="Dismiss"
               onClick={() => setMobileSheetDismissed(true)}
             >
@@ -1175,7 +1233,7 @@ function ExploreInner() {
 
       {/* Mobile full-screen search overlay */}
       {mobileSearchOpen && (
-        <div className="fixed inset-0 z-[60] flex flex-col bg-nh-cream md:hidden">
+        <div className="fixed inset-0 z-[60] flex flex-col bg-nh-cream lg:hidden">
           <div className="shrink-0 border-b border-nh-brown/10 bg-nh-cream/98 px-4 py-3">
             <div className="flex items-center gap-3">
               <button
@@ -1260,7 +1318,7 @@ function ExploreInner() {
         </div>
       )}
     </div>
-    <div className="md:pb-16">
+    <div className="lg:pb-16">
       <SiteFooter />
     </div>
     </>
