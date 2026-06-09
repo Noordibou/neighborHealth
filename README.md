@@ -2,6 +2,18 @@
 
 NeighborHealth is a geospatial public health prioritization tool for US census tracts. It combines ACS housing indicators with CDC PLACES health estimates into a composite index (0–100) that identifies where housing stress and health burden overlap.
 
+### Live app
+
+**[neighbor-health.vercel.app](https://neighbor-health.vercel.app/)** — production deploy (Vercel frontend + API).
+
+### Screenshots
+
+![NeighborHealth landing](frontend/public/images/Screenshot%202026-06-08%20193452.png)
+
+![NeighborHealth map explorer](frontend/public/images/Screenshot%202026-06-08%20193539.png)
+
+![NeighborHealth app view](frontend/public/images/Screenshot%202026-06-08%20193614.png)
+
 ---
 
 ## Local development setup
@@ -205,8 +217,8 @@ python scripts/load_hrsa_clinics.py
 
 | Layer | Platform |
 |-------|----------|
-| Frontend | Vercel |
-| Backend 
+| Frontend | [Vercel](https://neighbor-health.vercel.app/) |
+| Backend | Fly.io |
 | Database | Fly.io Postgres (PostGIS enabled, 1GB volume minimum) |
 
 Ingest is run manually from a local machine via `fly proxy` tunnel — it is not automated on the server.
