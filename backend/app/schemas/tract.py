@@ -137,6 +137,8 @@ class StateOut(BaseModel):
     state_fips: str
     state_name: str
     tract_count: int
+    scored_tract_count: int
+    data_year: int
 
 
 class SearchResult(BaseModel):

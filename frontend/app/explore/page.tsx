@@ -82,6 +82,30 @@ function priorityFlagCopy(mode: ExploreLayerMode): string {
   return "in high-overlap zone (class 3-3)";
 }
 
+function tractCountPhrase(count: number): string {
+  return `${count.toLocaleString()} ${count === 1 ? "tract" : "tracts"}`;
+}
+
+/** Status line for the year and tracts the map is actually scoring. */
+export function exploreDataStatusLine(opts: {
+  year: number | null;
+  stateName: string | null;
+  stateScored: number | null;
+  totalScored: number;
+  scoredStateCount: number;
+}): string | null {
+  if (opts.year == null) return null;
+  const vintage = `Data: ACS ${opts.year}`;
+  if (opts.stateName) {
+    const n = opts.stateScored ?? 0;
+    if (n <= 0) return `${vintage} · no scored tracts in ${opts.stateName}`;
+    return `${vintage} · ${tractCountPhrase(n)} in ${opts.stateName}`;
+  }
+  if (opts.totalScored <= 0 || opts.scoredStateCount <= 0) return `${vintage} · no scored tracts loaded`;
+  const states = opts.scoredStateCount === 1 ? "1 state" : `${opts.scoredStateCount} states`;
+  return `${vintage} · ${tractCountPhrase(opts.totalScored)} across ${states}`;
+}
+
 function ExploreInner() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -311,6 +335,8 @@ function ExploreInner() {
               state_fips: r.state_fips.padStart(2, "0"),
               state_name: r.state_name,
               tract_count: r.tract_count,
+              scored_tract_count: r.scored_tract_count,
+              data_year: r.data_year,
             }))
           );
         }
@@ -449,7 +475,11 @@ function ExploreInner() {
 
   const statePickerGeoJSON = useMemo(() => {
     if (!usStatesGeojson?.features?.length) return null;
-    const avail = new Set(availableStates.map((s) => s.state_fips.padStart(2, "0").slice(0, 2)));
+    const avail = new Set(
+      availableStates
+        .filter((s) => s.scored_tract_count > 0)
+        .map((s) => s.state_fips.padStart(2, "0").slice(0, 2))
+    );
     return {
       type: "FeatureCollection" as const,
       features: usStatesGeojson.features.map((f) => {
@@ -530,9 +560,19 @@ function ExploreInner() {
   }, [stateFips, availableStates]);
 
   const exploreDataStatus = useMemo(() => {
-    const total = availableStates.reduce((sum, st) => sum + st.tract_count, 0);
-    return { total, stateCount: availableStates.length };
-  }, [availableStates]);
+    const year = availableStates.find((s) => Number.isFinite(s.data_year))?.data_year ?? null;
+    const scored = availableStates.filter((s) => s.scored_tract_count > 0);
+    const totalScored = scored.reduce((sum, st) => sum + st.scored_tract_count, 0);
+    const sf = stateFips?.padStart(2, "0").slice(0, 2) ?? null;
+    const selected = sf ? availableStates.find((s) => s.state_fips.padStart(2, "0").slice(0, 2) === sf) : undefined;
+    return exploreDataStatusLine({
+      year,
+      stateName: sf ? (selected?.state_name ?? stateLabel) : null,
+      stateScored: sf ? (selected?.scored_tract_count ?? 0) : null,
+      totalScored,
+      scoredStateCount: scored.length,
+    });
+  }, [availableStates, stateFips, stateLabel]);
 
   const featureCount = geojson?.features?.length ?? 0;
   const noData = !err && geojson != null && featureCount === 0;
@@ -816,10 +856,9 @@ function ExploreInner() {
               </svg>
             </button>
           ) : null}
-          {exploreDataStatus.stateCount > 0 ? (
+          {exploreDataStatus ? (
             <p className="mb-1.5 hidden text-[10px] leading-snug text-nh-brown-muted lg:block">
-              Data: ACS 2022 · {exploreDataStatus.total.toLocaleString()} tracts across{" "}
-              {exploreDataStatus.stateCount} states
+              {exploreDataStatus}
             </p>
           ) : null}
           <div className="mb-2 hidden items-center justify-between gap-3 rounded-xl border border-nh-brown/10 bg-white/80 px-3 py-2 text-xs text-nh-brown-muted lg:flex lg:flex-wrap">

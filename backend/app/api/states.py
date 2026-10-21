@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import Tract
+from app.models import RiskScore, Tract
 from app.schemas.tract import StateOut
+from app.services.score_recalc import resolve_year
 
 router = APIRouter(prefix="/api/states", tags=["states"])
 
@@ -127,14 +128,36 @@ STATE_FIPS_TO_POSTAL: dict[str, str] = {v: k for k, v in STATE_POSTAL_TO_FIPS.it
 
 @router.get("", response_model=list[StateOut])
 async def list_states(session: Annotated[AsyncSession, Depends(get_db)]) -> list[StateOut]:
+    """States with tract boundaries, counted for the same year the map uses.
+
+    ``data_year`` is the newest year in ``risk_scores``. ``scored_tract_count`` is
+    tracts with a composite score that year. ``tract_count`` is every stored boundary.
+    """
+    year_eff = await resolve_year(session)
     q = (
-        select(Tract.state_fips, func.count())
+        select(
+            Tract.state_fips,
+            func.count(Tract.geoid),
+            func.count(RiskScore.geoid),
+        )
+        .outerjoin(
+            RiskScore,
+            and_(RiskScore.geoid == Tract.geoid, RiskScore.year == year_eff),
+        )
         .group_by(Tract.state_fips)
         .order_by(Tract.state_fips)
     )
     res = await session.execute(q)
     out: list[StateOut] = []
-    for sf, cnt in res.all():
+    for sf, tract_count, scored_count in res.all():
         name = STATE_NAMES.get(sf, sf)
-        out.append(StateOut(state_fips=sf, state_name=name, tract_count=int(cnt)))
+        out.append(
+            StateOut(
+                state_fips=sf,
+                state_name=name,
+                tract_count=int(tract_count),
+                scored_tract_count=int(scored_count),
+                data_year=year_eff,
+            )
+        )
     return out

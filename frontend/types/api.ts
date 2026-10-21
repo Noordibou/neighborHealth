@@ -75,7 +75,12 @@ export type TractScoreTrendPayload = {
 export type StateSummary = {
   state_fips: string;
   state_name: string;
+  /** Stored tract boundaries, including tracts with no score for data_year. */
   tract_count: number;
+  /** Tracts with a composite score for data_year. */
+  scored_tract_count: number;
+  /** Year the map uses: newest year in risk_scores. */
+  data_year: number;
 };
 
 /** Tract row returned by search endpoints */

@@ -157,12 +157,14 @@ export function TrendChart({ geoid, has_trend }: TrendChartProps) {
 
       <div className="h-[72px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={displayed} margin={{ top: 6, right: 8, left: 4, bottom: 2 }}>
+          <LineChart data={displayed} margin={{ top: 6, right: 8, left: 8, bottom: 2 }}>
             <XAxis
               dataKey="year"
               type="number"
               domain={["dataMin", "dataMax"]}
+              padding={{ left: 16, right: 16 }}
               ticks={displayed.map((d) => d.year)}
+              interval={0}
               tick={{ fontSize: 10, fill: "#516158" }}
               tickFormatter={(v) => String(Math.round(Number(v)))}
               axisLine={false}
