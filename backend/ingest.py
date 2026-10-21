@@ -234,14 +234,6 @@ def _places_dataset_for_year(year: int) -> str:
         raise ValueError(f"No PLACES dataset configured for year {year}.") from e
 
 
-def heat_from_lat(lat: float | None) -> float:
-    """Heat-risk index 0–100 from latitude (warmer south → higher)."""
-    if lat is None or (isinstance(lat, float) and math.isnan(lat)):
-        return 50.0
-    return max(0.0, min(100.0, 150.0 - 3.0 * float(lat)))
-
-
-
 def _acs_pct_moe_from_denominator_moe(
     row: list[str],
     header: list[str],
@@ -1468,9 +1460,6 @@ async def run_ingest(states: list[str], year: int) -> None:
                         gid = str(row[geoid_col])
                         a = acs.get(gid, {})
                         p = places.get(gid, {})
-                        geom = row.geometry
-                        lat = float(geom.centroid.y) if geom is not None else None
-                        heat = heat_from_lat(lat)
 
                         rows: list[tuple[str, str, float, int, float | None]] = []
                         if "rent_burden_pct" in a:
@@ -1488,7 +1477,6 @@ async def run_ingest(states: list[str], year: int) -> None:
                         for k in DISPLAY_ONLY_METRICS:
                             if k in p:
                                 rows.append(("cdc_places", k, p[k], year, None))
-                        rows.append(("computed", "heat_index", heat, year, None))
 
                         present = {r[1] for r in rows}
                         if all(m in present for m in METRIC_KEYS):

@@ -9,7 +9,6 @@ export const METRIC_KEYS = [
   "uninsured_pct",
   "asthma_pct",
   "mental_health_pct",
-  "heat_index",
 ] as const;
 
 export type MetricKey = (typeof METRIC_KEYS)[number];
@@ -23,19 +22,22 @@ const DEFAULT_WEIGHTS: Record<MetricKey, number> = {
   mental_health_pct:       0.15,
   asthma_pct:              0.10,
   structural_vacancy_rate: 0.05,
-  heat_index:              0.05,
 };
 
 export function clampWeights(weights?: Partial<Record<MetricKey, number>>): Record<MetricKey, number> {
   const w = { ...DEFAULT_WEIGHTS };
-  if (!weights) return w;
-  for (const k of METRIC_KEYS) {
-    if (weights[k] != null && !Number.isNaN(weights[k]!)) {
-      w[k] = Math.max(0, weights[k]!);
+  if (weights) {
+    for (const k of METRIC_KEYS) {
+      if (weights[k] != null && !Number.isNaN(weights[k]!)) {
+        w[k] = Math.max(0, weights[k]!);
+      }
     }
   }
   const total = METRIC_KEYS.reduce((s, k) => s + w[k], 0);
-  if (total <= 0) return { ...DEFAULT_WEIGHTS };
+  if (total <= 0) {
+    const share = 1 / METRIC_KEYS.length;
+    return Object.fromEntries(METRIC_KEYS.map((k) => [k, share])) as Record<MetricKey, number>;
+  }
   return Object.fromEntries(METRIC_KEYS.map((k) => [k, w[k] / total])) as Record<MetricKey, number>;
 }
 

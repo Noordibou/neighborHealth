@@ -4,9 +4,9 @@ export const RACE_SEGMENTS: {
   barColor: string;
   labelClass: string;
 }[] = [
-  { key: "pct_white", label: "White", barColor: "#f2c49c", labelClass: "text-nh-brown" },
-  { key: "pct_black", label: "Black", barColor: "#6ec4f0", labelClass: "text-nh-brown" },
-  { key: "pct_hispanic", label: "Hispanic", barColor: "#8fb88f", labelClass: "text-nh-brown" },
-  { key: "pct_asian", label: "Asian", barColor: "#eb9a8e", labelClass: "text-nh-brown" },
-  { key: "pct_other_race", label: "Other", barColor: "#42a8ad", labelClass: "text-nh-brown" },
+  { key: "pct_white", label: "White", barColor: "#7d7a72", labelClass: "text-nh-brown" },
+  { key: "pct_black", label: "Black", barColor: "#3d5a80", labelClass: "text-nh-brown" },
+  { key: "pct_hispanic", label: "Hispanic", barColor: "#c4501a", labelClass: "text-nh-brown" },
+  { key: "pct_asian", label: "Asian", barColor: "#1f6b62", labelClass: "text-nh-brown" },
+  { key: "pct_other_race", label: "Other", barColor: "#8a6232", labelClass: "text-nh-brown" },
 ];

@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Fraunces, Inter } from "next/font/google";
+import { Newsreader, Public_Sans } from "next/font/google";
 import { AppChrome } from "@/components/AppChrome";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const display = Fraunces({
+const sans = Public_Sans({ subsets: ["latin"], variable: "--font-sans" });
+const display = Newsreader({
   subsets: ["latin"],
   variable: "--font-display",
 });
@@ -22,7 +22,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${inter.variable} ${display.variable} min-h-screen bg-nh-cream font-sans text-nh-ink antialiased`}
+        className={`${sans.variable} ${display.variable} min-h-screen bg-nh-cream font-sans text-nh-ink antialiased`}
       >
         <AppChrome />
         <main>{children}</main>

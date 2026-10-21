@@ -67,7 +67,6 @@ METRIC_LABELS: dict[str, str] = {
     "uninsured_pct": "Uninsured rate",
     "asthma_pct": "Asthma prevalence",
     "mental_health_pct": "Mental health",
-    "heat_index": "Heat stress index",
     "disability_pct": "Disability rate",  # stored, not scored — display-only
 }
 
@@ -114,8 +113,6 @@ def format_metric_value(metric: str, value: float | None) -> str:
         return "—"
     if metric == "rent_burden_pct":
         return f"{round(fv)}% burdened"
-    if metric == "heat_index":
-        return f"{fv:.1f}"
     if metric.endswith("_pct") or metric == "structural_vacancy_rate":
         return f"{fv:.1f}%"
     return f"{fv:.2f}"

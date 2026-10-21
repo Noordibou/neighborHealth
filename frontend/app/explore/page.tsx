@@ -589,16 +589,16 @@ function ExploreInner() {
               )}
             </p>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex items-start justify-end gap-1">
             <Link
               href="/#methodology"
-              className="text-sm font-medium text-nh-brown-muted hover:text-nh-brown"
+              className="inline-flex items-center px-2 py-2 text-sm font-medium text-nh-brown-muted hover:text-nh-brown"
             >
               Methods & data
             </Link>
             <a
               href={`${API_BASE}/api/export/tracts.csv${stateFips ? `?state=${stateFips}` : ""}`}
-              className="text-sm font-medium text-nh-brown-muted hover:text-nh-brown"
+              className="inline-flex items-center px-2 py-2 text-sm font-medium text-nh-brown-muted hover:text-nh-brown"
             >
               Export
             </a>
@@ -606,7 +606,7 @@ function ExploreInner() {
               <button
                 type="button"
                 onClick={shareView}
-                className="shrink-0 rounded-full bg-nh-brown px-4 py-2 text-sm font-semibold text-nh-cream shadow-sm hover:bg-nh-brown/90"
+                className="shrink-0 rounded-md bg-nh-brown px-4 py-2 text-sm font-semibold text-nh-cream hover:bg-nh-brown/90"
               >
                 Share view
               </button>
@@ -712,7 +712,7 @@ function ExploreInner() {
                 </div>
                 <button
                   type="submit"
-                  className="w-full rounded-xl bg-nh-terracotta py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-nh-terracotta-dark"
+                  className="w-full rounded-md bg-nh-terracotta py-2.5 text-sm font-semibold text-white hover:bg-nh-terracotta-dark"
                 >
                   Search map
                 </button>
@@ -760,8 +760,10 @@ function ExploreInner() {
                         return (
                           <li
                             key={r.geoid}
-                            className={`rounded-xl border p-2 ${
-                              isSel ? "border-nh-brown bg-white shadow-sm" : "border-nh-brown/10 bg-nh-cream/30"
+                            className={`rounded-xl border p-2 transition ${
+                              isSel
+                                ? "border-[#e8b2a8] bg-[#f4e6e3] hover:bg-[#ead6d0]"
+                                : "border-nh-brown/10 bg-nh-cream/30 hover:bg-[#eef2ef]"
                             }`}
                           >
                             <button
@@ -825,17 +827,17 @@ function ExploreInner() {
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-nh-brown-muted">
                 Layer
               </span>
-              <div className="flex min-w-0 rounded-full bg-[#ebe6df] p-1">
+              <div className="flex min-w-0 rounded-md bg-[#dce3de] p-0.5">
                 {layerTabs.map((t) => (
                   <button
                     key={t.id}
                     type="button"
                     title={t.sublabel ? `${t.label}: ${t.sublabel}` : t.label}
                     onClick={() => setLayerMode(t.id)}
-                    className={`min-w-0 rounded-full px-2.5 py-1.5 text-center text-xs font-semibold transition sm:px-3 ${
+                    className={`min-w-0 rounded-md px-2.5 py-1.5 text-center text-xs font-semibold transition sm:px-3 ${
                       layerMode === t.id
-                        ? "bg-[#2d2d2d] text-white shadow-sm"
-                        : "bg-transparent text-[#5c534c] hover:text-[#2d2d2d]"
+                        ? "bg-[#1c2823] text-white shadow-sm"
+                        : "bg-transparent text-[#516158] hover:text-[#1c2823]"
                     }`}
                   >
                     <span className="flex flex-col items-center gap-0 leading-tight">
@@ -843,7 +845,7 @@ function ExploreInner() {
                       {t.sublabel ? (
                         <span
                           className={`hidden max-w-[7rem] truncate text-[9px] font-normal sm:block ${
-                            layerMode === t.id ? "text-white/75" : "text-[#8e8e8e]"
+                            layerMode === t.id ? "text-white/75" : "text-[#6a7870]"
                           }`}
                         >
                           {t.sublabel}
@@ -983,7 +985,7 @@ function ExploreInner() {
             <button
               type="button"
               onClick={() => setMobileSearchOpen(true)}
-              className="absolute left-4 right-4 top-3 z-30 flex h-12 items-center gap-3 rounded-full border border-nh-brown/10 bg-white px-4 shadow-lg lg:hidden"
+              className="absolute left-4 right-4 top-3 z-30 flex h-12 items-center gap-3 rounded-md border border-nh-brown/15 bg-white px-4 shadow-md lg:hidden"
             >
               <svg className="h-4 w-4 shrink-0 text-nh-brown-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1005,7 +1007,7 @@ function ExploreInner() {
                   key={t.id}
                   type="button"
                   onClick={() => setLayerMode(t.id)}
-                  className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+                  className={`shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                     layerMode === t.id
                       ? "bg-nh-brown text-white"
                       : "border border-nh-brown/15 bg-white/95 text-nh-brown hover:bg-nh-cream"
@@ -1024,7 +1026,7 @@ function ExploreInner() {
                 <button
                   type="button"
                   onClick={() => setMobileMode("list")}
-                  className="inline-flex shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-full bg-nh-brown/90 px-4 py-2.5 text-sm font-semibold leading-none text-nh-cream shadow-lg backdrop-blur-sm transition-colors hover:bg-nh-brown"
+                  className="inline-flex shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-md bg-nh-brown/90 px-4 py-2.5 text-sm font-semibold leading-none text-nh-cream shadow-md transition-colors hover:bg-nh-brown"
                 >
                   <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -1081,7 +1083,7 @@ function ExploreInner() {
                 <button
                   type="button"
                   onClick={() => setMobileTrayExpanded(true)}
-                  className="inline-flex shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-full bg-nh-brown px-4 py-2.5 text-sm font-semibold leading-none text-nh-cream shadow-lg transition-colors hover:bg-nh-brown/90"
+                  className="inline-flex shrink-0 flex-nowrap items-center gap-2 whitespace-nowrap rounded-md bg-nh-brown px-4 py-2.5 text-sm font-semibold leading-none text-nh-cream shadow-md transition-colors hover:bg-nh-brown/90"
                 >
                   <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -1094,7 +1096,7 @@ function ExploreInner() {
 
         </div>
 
-        <aside className={`min-h-0 flex-col overflow-hidden border-[#e8e3dc] bg-[#faf8f5] lg:flex lg:flex-none lg:h-full lg:w-[300px] lg:border-l ${mobileMode === "list" ? "flex flex-1" : "hidden"}`}>
+        <aside className={`min-h-0 flex-col overflow-hidden border-[#d3ddd6] bg-[#f4f7f5] lg:flex lg:flex-none lg:h-full lg:w-[300px] lg:border-l ${mobileMode === "list" ? "flex flex-1" : "hidden"}`}>
           {mobileMode === "list" ? (
             <div className="shrink-0 border-b border-nh-brown/10 p-3 lg:hidden">
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-nh-brown/10 bg-white px-3 py-2.5 shadow-sm">
@@ -1121,16 +1123,16 @@ function ExploreInner() {
                     <h3 className="font-display text-base font-semibold text-nh-brown">
                       Find high-burden communities
                     </h3>
-                    <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
+                    <p className="mt-2 text-sm leading-relaxed text-[#516158]">
                       Select a state on the map to view tract rankings by housing stress and health burden.
                     </p>
-                    <p className="mt-2 text-sm leading-relaxed text-[#6b6560]">
+                    <p className="mt-2 text-sm leading-relaxed text-[#516158]">
                       Or search for a neighborhood, address, or Census tract ID using the search bar.
                     </p>
                   </div>
                 )}
                 {!selectedGeoid && stateFips && (
-                  <p className="text-sm leading-relaxed text-[#6b6560]">
+                  <p className="text-sm leading-relaxed text-[#516158]">
                     Click a tract on the map to inspect scores and add to compare.
                   </p>
                 )}

@@ -1,7 +1,7 @@
 """Composite Housing-Health Risk Score (0–100).
 
-Seven indicators, each normalized to 0–100 using min–max across the cohort, then
-weighted-averaged. Weights default to equal (1/7 each) and may be overridden.
+Six indicators, each normalized to 0–100 using min–max across the cohort, then
+weighted-averaged. Default weights are domain-informed and renormalized to sum to 1.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ METRIC_KEYS: tuple[str, ...] = (
     "uninsured_pct",
     "asthma_pct",
     "mental_health_pct",
-    "heat_index",
 )
 
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -26,20 +25,19 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "mental_health_pct":       0.15,
     "asthma_pct":              0.10,
     "structural_vacancy_rate": 0.05,
-    "heat_index":              0.05,
 }
 
 
 def clamp_weights(weights: dict[str, float] | None) -> dict[str, float]:
     w = dict(DEFAULT_WEIGHTS)
-    if not weights:
-        return w
-    for k in METRIC_KEYS:
-        if k in weights and weights[k] is not None:
-            w[k] = max(0.0, float(weights[k]))
-    total = sum(w.values())
+    if weights:
+        for k in METRIC_KEYS:
+            if k in weights and weights[k] is not None:
+                w[k] = max(0.0, float(weights[k]))
+    total = sum(w[k] for k in METRIC_KEYS)
     if total <= 0:
-        return dict(DEFAULT_WEIGHTS)
+        share = 1.0 / len(METRIC_KEYS)
+        return {k: share for k in METRIC_KEYS}
     return {k: w[k] / total for k in METRIC_KEYS}
 
 

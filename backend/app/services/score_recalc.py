@@ -79,7 +79,7 @@ async def recalculate_risk_scores(
     year: int,
     weights: dict[str, float] | None = None,
 ) -> int:
-    """Recompute risk_scores for all tracts that have the seven core metrics for ``year``."""
+    """Recompute risk_scores for all tracts that have the six core metrics for ``year``."""
     w = clamp_weights(weights)
 
     # Exclude zero-population and institutional tracts from the scored cohort.

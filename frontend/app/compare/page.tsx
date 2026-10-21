@@ -62,7 +62,6 @@ const METRIC_SHORT_LABELS: Record<MetricKey, string> = {
   uninsured_pct: "Uninsured",
   asthma_pct: "Asthma",
   mental_health_pct: "Mental health",
-  heat_index: "Heat index",
 };
 
 

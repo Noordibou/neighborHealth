@@ -57,19 +57,19 @@ export function TractDetailPanel({
   });
 
   return (
-    <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] p-4 shadow-sm">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8e8e8e]">Selected tract</p>
+    <div className="rounded-2xl border border-[#d3ddd6] bg-[#f4f7f5] p-4 shadow-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6a7870]">Selected tract</p>
       <div className="mt-3 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="font-display text-xl font-bold leading-tight text-[#2d2d2d]">{headline}</h3>
+          <h3 className="font-display text-xl font-bold leading-tight text-[#1c2823]">{headline}</h3>
           {subline ? (
-            <p className="mt-1 break-words text-sm text-[#6b6560]">{subline}</p>
+            <p className="mt-1 break-words text-sm text-[#516158]">{subline}</p>
           ) : null}
-          <p className="mt-1 font-mono text-[13px] text-[#6b6560]">Tract ID {tract.geoid}</p>
+          <p className="mt-1 font-mono text-[13px] text-[#516158]">Tract ID {tract.geoid}</p>
         </div>
         <div className="shrink-0 text-right">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">Index</p>
-          <p className="font-display text-[2.75rem] font-bold leading-none text-[#c4a574]">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6a7870]">Index</p>
+          <p className="font-display text-[2.75rem] font-bold leading-none text-[#b42318]">
             {tract.risk_score?.composite_score != null
               ? Math.round(tract.risk_score.composite_score)
               : "—"}
@@ -80,7 +80,7 @@ export function TractDetailPanel({
       <div className="mt-4 grid grid-cols-2 gap-2">
         <Link
           href={`/tract/${tract.geoid}`}
-          className="flex h-10 min-w-0 items-center justify-center whitespace-nowrap rounded-full bg-[#b34d3a] lg:px-2 text-center lg:text-xs font-semibold text-white shadow-sm hover:bg-[#9a4131] px-3 text-sm"
+          className="flex h-10 min-w-0 items-center justify-center whitespace-nowrap rounded-full bg-[#b42318] lg:px-2 text-center lg:text-xs font-semibold text-white shadow-sm hover:bg-[#8c1a12] px-3 text-sm"
         >
           View profile →
         </Link>
@@ -90,8 +90,8 @@ export function TractDetailPanel({
           disabled={isInCompare || compareDisabled}
           className={`flex h-10 min-w-0 items-center justify-center whitespace-nowrap rounded-full border-2 lg:px-2 text-center lg:text-xs font-semibold shadow-sm transition disabled:opacity-40 px-3 text-sm ${
             isInCompare
-              ? "border-[#b34d3a] bg-white text-[#b34d3a]"
-              : "border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/40"
+              ? "border-[#b42318] bg-white text-[#b42318]"
+              : "border-[#c5d0c8] bg-white text-[#1c2823] hover:border-[#b42318]/40"
           }`}
         >
           {isInCompare ? "✓ In compare" : "+ Compare"}
@@ -118,7 +118,7 @@ export function TractDetailPanel({
               : "Peer median position unavailable";
           return (
             <div key={metric_name}>
-              <div className="flex justify-between text-xs text-[#2d2d2d]">
+              <div className="flex justify-between text-xs text-[#1c2823]">
                 <span>{label}</span>
                 <span className="tabular-nums font-semibold">
                   {v != null
@@ -126,7 +126,7 @@ export function TractDetailPanel({
                     : "—"}
                 </span>
               </div>
-              <div className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-[#ebe6df]">
+              <div className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-[#dce3de]">
                 {pct != null ? (
                   <div
                     className="absolute left-0 top-0 h-full rounded-full"
@@ -134,7 +134,7 @@ export function TractDetailPanel({
                   />
                 ) : null}
                 <div
-                  className="pointer-events-none absolute top-0 z-[1] h-full w-px -translate-x-1/2 border-l border-dashed border-[#9ca3af]"
+                  className="pointer-events-none absolute top-0 z-[1] h-full w-px -translate-x-1/2 border-l border-dashed border-[#7d8b84]"
                   style={{ left: `${markerPos}%` }}
                   title={markerTitle}
                   aria-hidden
@@ -144,8 +144,8 @@ export function TractDetailPanel({
           );
         })}
       </div>
-      <p className="mt-5 border-t border-[#e8e3dc] pt-3 text-[10px] leading-snug text-[#8e8e8e]">
-        <span className="inline-block translate-y-px border-l border-dashed border-[#9ca3af] pl-1">
+      <p className="mt-5 border-t border-[#d3ddd6] pt-3 text-[10px] leading-snug text-[#6a7870]">
+        <span className="inline-block translate-y-px border-l border-dashed border-[#7d8b84] pl-1">
           Dashed line = county median percentile vs peers in the same county when enough tracts; otherwise state
           median percentile.
         </span>

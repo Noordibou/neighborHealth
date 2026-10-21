@@ -106,14 +106,13 @@ frontend/
 | ACS context fields | 2022 5-year | Same endpoint | B25058 (median rent), B19013 (income), B25004 (vacancy by reason) |
 | CDC PLACES | 2023 release | chronicdata.cdc.gov/resource/hky2-3tpn.json | Dataset ID hky2-3tpn |
 | HRSA FQHCs | Current | data.hrsa.gov/api/download?filename=HCSODSite_DATA_MAIN.csv | Operational sites only |
-| Heat index | Computed | — | clamp(150 - 3 × centroid_lat, 0, 100) |
 | 2020/2021 ACS | Backfilled | api.census.gov/data/2020/ and /2021/ | 2020 has elevated MOE — flagged in trend chart |
 
 ACS sentinel for suppressed values: `-666666666` — always check before converting to float.
 
 ---
 
-## The 7 scored metrics (METRIC_KEYS)
+## The 6 scored metrics (METRIC_KEYS)
 
 These are the only metrics that feed into the composite score.
 Do not add to this list without updating the scoring pipeline, cache invalidation,
@@ -127,11 +126,10 @@ and the DB cohort inclusion rule.
 | mental_health_pct | CDC PLACES | mhlth_crudeprev (passthrough) | 0.15 |
 | asthma_pct | CDC PLACES | casthma_crudeprev (passthrough) | 0.10 |
 | structural_vacancy_rate | ACS B25002 + B25004 | (B25002_003E − B25004_006E) / B25002_001E × 100 | 0.05 |
-| heat_index | Computed | clamp(150 − 3 × lat, 0, 100) | 0.05 |
 
 **disability_pct** is stored as an indicator (source: cdc_places, disability_crudeprev) but is **not scored**. It appears on the tract profile as a display-only context indicator. After this change, existing `risk_scores` rows computed with the old METRIC_KEYS are stale — run `DELETE FROM risk_scores;` then re-ingest or call `recalculate_risk_scores()` for each year before going live.
 
-**Cohort inclusion rule:** A tract must have all 7 metrics present to receive a
+**Cohort inclusion rule:** A tract must have all 6 metrics present to receive a
 composite score. Tracts missing any metric are excluded from scoring and
 percentile computation. This is enforced in `score_recalc.py` and `ingest.py`.
 
@@ -149,14 +147,14 @@ compute_batch_scores() — backend/app/services/risk_score.py
   2. weighted sum of normalized values
   3. clamp result to 0–100
 
-Default weights: rent_burden 0.25 · uninsured 0.20 · overcrowding 0.20 · mental_health 0.15 · asthma 0.10 · structural_vacancy 0.05 · heat_index 0.05
+Default weights (renormalized to 1): rent_burden 0.2632 · uninsured 0.2105 · overcrowding 0.2105 · mental_health 0.1579 · asthma 0.1053 · structural_vacancy 0.0526
 Weight rules: negative weights clamped to 0, then renormalized to sum=1
 ```
 
 **Two-layer in-process cache** — do not bypass or duplicate:
 - Layer 1: `get_cached_metric_map(session, year)` — caches 147K indicator rows, TTL 1hr
 - Layer 2: `get_cached_default_scores(session, year)` — caches full 21K-tract scored batch, TTL 1hr
-- Custom weight requests use cached component scores + dot product (7 multiplications)
+- Custom weight requests use cached component scores + dot product (6 multiplications)
 - Both layers invalidated by `invalidate_metric_map_cache()` at end of ingest
 
 **Performance baseline (post-optimization):**
@@ -173,7 +171,7 @@ Weight rules: negative weights clamped to 0, then renormalized to sum=1
 indicators          (geoid, metric_name, year, value, source,
                      percentile_national, percentile_state, percentile_county,
                      value_moe)
-                    — 589K rows, 7 metrics × 3 years × ~28K scored tracts
+                    — one row per tract, scored metric, and year
 
 risk_scores         (geoid, year, composite_score, component_scores, weights_used)
                     — 84K rows, 3 years

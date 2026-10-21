@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 :root {
-  font-family: var(--font-inter), system-ui, sans-serif;
-  --color-text-tertiary: #8e8e8e;
-  --color-border-secondary: #d4cbc2;
-  --nh-cream: #faf6ef;
-  --nh-terracotta: #c45c3e;
-  --nh-brown: #2c1810;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  --color-text-tertiary: #6a7870;
+  --color-border-secondary: #c5d0c8;
+  --nh-cream: #eef2ef;
+  --nh-terracotta: #b42318;
+  --nh-brown: #1c2823;
 }

@@ -79,17 +79,17 @@ export default async function TractPage({ params }: Props) {
         <TractMapBackControl />
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <span className="rounded-full bg-nh-terracotta/15 px-3 py-1 text-xs font-semibold text-nh-terracotta">
+          <span className="rounded-md bg-nh-terracotta/10 px-3 py-1 text-xs font-semibold text-nh-terracotta">
             Priority · {tier}
           </span>
-          <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown-muted">
+          <span className="rounded-md border border-nh-brown/15 bg-white px-3 py-1 text-xs font-medium text-nh-brown-muted">
             Year {tract.risk_score?.year ?? "—"}
           </span>
-          <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium text-nh-brown-muted">
+          <span className="rounded-md border border-nh-brown/15 bg-white px-3 py-1 text-xs font-medium text-nh-brown-muted">
             Tract ID {tract.geoid}
           </span>
           {tract.median_rent != null ? (
-            <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium">
+            <span className="rounded-md border border-nh-brown/15 bg-white px-3 py-1 text-xs font-medium">
               <span className="text-nh-brown-muted">Median rent</span>{" "}
               <span className="text-nh-brown">
                 ${Math.round(tract.median_rent).toLocaleString("en-US")} / mo
@@ -97,7 +97,7 @@ export default async function TractPage({ params }: Props) {
             </span>
           ) : null}
           {tract.median_household_income != null ? (
-            <span className="rounded-full border border-nh-brown/10 bg-white px-3 py-1 text-xs font-medium">
+            <span className="rounded-md border border-nh-brown/15 bg-white px-3 py-1 text-xs font-medium">
               <span className="text-nh-brown-muted">Median income</span>{" "}
               <span className="text-nh-brown">${Math.round(tract.median_household_income).toLocaleString("en-US")}</span>
             </span>
@@ -109,13 +109,13 @@ export default async function TractPage({ params }: Props) {
             {scoreRounded != null && (
               <>
                 <div
-                  className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full border-[6px] border-nh-terracotta/25 bg-white shadow-inner md:h-36 md:w-36 md:border-[8px]"
+                  className="relative flex min-w-[7.5rem] shrink-0 flex-col items-start justify-center rounded-md border border-nh-brown/20 border-l-[6px] border-l-nh-terracotta bg-white px-4 py-3 md:min-w-[9.5rem] md:px-5 md:py-4"
                   aria-label={`Composite score ${scoreRounded} out of 100`}
                 >
-                  <div className="text-center">
-                    <p className="text-[9px] font-bold uppercase tracking-wide text-nh-brown-muted md:text-[10px]">Composite</p>
-                    <p className="font-display text-3xl font-bold text-nh-terracotta md:text-4xl">{scoreRounded}</p>
-                    <p className="text-[8px] text-nh-brown-muted md:text-[9px]">out of 100</p>
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-nh-brown-muted md:text-[10px]">Composite</p>
+                    <p className="font-display text-4xl font-medium leading-none text-nh-terracotta md:text-5xl">{scoreRounded}</p>
+                    <p className="mt-1 text-[10px] text-nh-brown-muted">out of 100</p>
                   </div>
                 </div>
                 <p className="text-center text-[11px] text-nh-brown-muted sm:text-left">

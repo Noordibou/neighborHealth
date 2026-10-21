@@ -115,7 +115,7 @@ def _csv_missing(v: Any) -> bool:
 
 
 def _fmt_metric_value(v: Any) -> str:
-    """Metric raw values (incl. % metrics, heat index): 2 decimal places."""
+    """Metric raw values (including percent metrics): 2 decimal places."""
     if _csv_missing(v):
         return ""
     return f"{float(v):.2f}"

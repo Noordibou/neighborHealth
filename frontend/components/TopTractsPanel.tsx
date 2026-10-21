@@ -187,14 +187,14 @@ export function TopTractsPanel({
   }
 
   return (
-    <div className="rounded-2xl border border-[#e8e3dc] bg-[#f9f7f2] shadow-sm">
-      <div className="border-b border-[#ebe6df] px-4 py-3">
+    <div className="rounded-2xl border border-[#d3ddd6] bg-[#f4f7f5] shadow-sm">
+      <div className="border-b border-[#dce3de] px-4 py-3">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#5c4a42]">
+          <h2 className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#516158]">
             Top tracts — {TOP_TRACT_LAYER_HEADING[layerMode]}
           </h2>
           <div className="flex shrink-0 items-center gap-1.5">
-            <span className="text-[11px] tabular-nums text-[#8e8e8e]">
+            <span className="text-[11px] tabular-nums text-[#6a7870]">
               {ranked.length} / {rankedTotal || "—"}
             </span>
             {stateFips ? (
@@ -204,7 +204,7 @@ export function TopTractsPanel({
                 aria-expanded={rankingFiltersOpen}
                 aria-controls="ranking-filters-panel"
                 aria-label={rankingFiltersOpen ? "Hide ranking filters" : "Show ranking filters"}
-                className={`rounded-lg p-1.5 text-[#8e8e8e] transition hover:bg-[#ebe6df] hover:text-[#5c534c] ${rankingFiltersOpen ? "bg-[#ebe6df] text-[#5c534c]" : ""}`}
+                className={`rounded-lg p-1.5 text-[#6a7870] transition hover:bg-[#dce3de] hover:text-[#516158] ${rankingFiltersOpen ? "bg-[#dce3de] text-[#516158]" : ""}`}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
                   <path
@@ -218,14 +218,14 @@ export function TopTractsPanel({
             ) : null}
           </div>
         </div>
-        <p className="mt-1.5 text-[10px] leading-relaxed text-[#8e8e8e]">{TOP_TRACT_SORT_HINT[layerMode]}</p>
+        <p className="mt-1.5 text-[10px] leading-relaxed text-[#6a7870]">{TOP_TRACT_SORT_HINT[layerMode]}</p>
       </div>
 
       {stateFips && rankingFiltersOpen ? (
-        <div id="ranking-filters-panel" className="space-y-3 border-b border-[#ebe6df] bg-[#faf8f5] px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8e8e8e]">Refine ranking list</p>
+        <div id="ranking-filters-panel" className="space-y-3 border-b border-[#dce3de] bg-[#f4f7f5] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6a7870]">Refine ranking list</p>
           <div>
-            <div className="flex justify-between gap-2 text-[11px] font-medium text-[#5c534c]">
+            <div className="flex justify-between gap-2 text-[11px] font-medium text-[#516158]">
               <span className="shrink-0">Min. composite score</span>
               <span className="tabular-nums">Score ≥ {draft.minScore}</span>
             </div>
@@ -236,18 +236,18 @@ export function TopTractsPanel({
               step={1}
               value={draft.minScore}
               onChange={(e) => setDraft((d) => ({ ...d, minScore: Math.round(Number(e.target.value)) }))}
-              className="mt-1 w-full accent-[#b34d3a]"
+              className="mt-1 w-full accent-[#b42318]"
             />
           </div>
           <div>
-            <label htmlFor="nh-pop-min" className="block text-[11px] font-medium text-[#5c534c]">
+            <label htmlFor="nh-pop-min" className="block text-[11px] font-medium text-[#516158]">
               Min. population
             </label>
             <select
               id="nh-pop-min"
               value={applied.minPopulation}
               onChange={(e) => setApplied((a) => ({ ...a, minPopulation: Number(e.target.value) }))}
-              className="mt-1 w-full rounded-xl border border-[#ebe6df] bg-white py-2 pl-3 pr-8 text-sm text-[#2d2d2d] focus:border-[#b34d3a] focus:outline-none focus:ring-1 focus:ring-[#b34d3a]"
+              className="mt-1 w-full rounded-xl border border-[#dce3de] bg-white py-2 pl-3 pr-8 text-sm text-[#1c2823] focus:border-[#b42318] focus:outline-none focus:ring-1 focus:ring-[#b42318]"
             >
               <option value={0}>Any</option>
               <option value={500}>500+</option>
@@ -256,17 +256,17 @@ export function TopTractsPanel({
               <option value={5000}>5,000+</option>
             </select>
           </div>
-          <label className="flex cursor-pointer items-start gap-2.5 text-[11px] font-medium text-[#5c534c]">
+          <label className="flex cursor-pointer items-start gap-2.5 text-[11px] font-medium text-[#516158]">
             <input
               type="checkbox"
               checked={applied.excludeInstitutional}
               onChange={(e) => setApplied((a) => ({ ...a, excludeInstitutional: e.target.checked }))}
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#d6cfc7] text-[#b34d3a] accent-[#b34d3a]"
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#c5d0c8] text-[#b42318] accent-[#b42318]"
             />
             <span>Exclude institutional tracts</span>
           </label>
           <div>
-            <label htmlFor="nh-fqhc-access" className="block text-[11px] font-medium text-[#5c534c]">
+            <label htmlFor="nh-fqhc-access" className="block text-[11px] font-medium text-[#516158]">
               FQHC access
             </label>
             <select
@@ -278,7 +278,7 @@ export function TopTractsPanel({
                   clinicDist: e.target.value as "" | "1" | "2" | "5" | "over5",
                 }))
               }
-              className="mt-1 w-full rounded-xl border border-[#ebe6df] bg-white py-2 pl-3 pr-8 text-sm text-[#2d2d2d] focus:border-[#b34d3a] focus:outline-none focus:ring-1 focus:ring-[#b34d3a]"
+              className="mt-1 w-full rounded-xl border border-[#dce3de] bg-white py-2 pl-3 pr-8 text-sm text-[#1c2823] focus:border-[#b42318] focus:outline-none focus:ring-1 focus:ring-[#b42318]"
             >
               <option value="">Any</option>
               <option value="1">Within 1 mile</option>
@@ -288,7 +288,7 @@ export function TopTractsPanel({
             </select>
           </div>
           <div>
-            <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
+            <div className="flex justify-between text-[11px] font-medium text-[#516158]">
               <span>Rent burden ≥</span>
               <span>{draft.minRent}%</span>
             </div>
@@ -298,11 +298,11 @@ export function TopTractsPanel({
               max={100}
               value={draft.minRent}
               onChange={(e) => setDraft((d) => ({ ...d, minRent: Number(e.target.value) }))}
-              className="mt-1 w-full accent-[#b34d3a]"
+              className="mt-1 w-full accent-[#b42318]"
             />
           </div>
           <div>
-            <div className="flex justify-between text-[11px] font-medium text-[#5c534c]">
+            <div className="flex justify-between text-[11px] font-medium text-[#516158]">
               <span>Uninsured ≥</span>
               <span>{draft.minUninsured}%</span>
             </div>
@@ -312,7 +312,7 @@ export function TopTractsPanel({
               max={50}
               value={draft.minUninsured}
               onChange={(e) => setDraft((d) => ({ ...d, minUninsured: Number(e.target.value) }))}
-              className="mt-1 w-full accent-[#b34d3a]"
+              className="mt-1 w-full accent-[#b42318]"
             />
           </div>
           <div className="flex flex-col gap-2">
@@ -321,13 +321,13 @@ export function TopTractsPanel({
                 type="button"
                 onClick={() => void downloadFilteredCsv()}
                 disabled={exportLoading}
-                className="w-full rounded-xl border border-[#b34d3a]/40 bg-white py-2 text-sm font-semibold text-[#b34d3a] shadow-sm hover:bg-[#faf6f0] disabled:opacity-50"
+                className="w-full rounded-xl border border-[#b42318]/40 bg-white py-2 text-sm font-semibold text-[#b42318] shadow-sm hover:bg-[#eef2ef] disabled:opacity-50"
               >
                 {exportLoading ? "Exporting…" : "Export filtered tracts (CSV)"}
               </button>
             ) : (
               <p
-                className="rounded-lg border border-dashed border-[#d6cfc7] px-3 py-2 text-center text-[11px] text-[#8e8e8e]"
+                className="rounded-lg border border-dashed border-[#c5d0c8] px-3 py-2 text-center text-[11px] text-[#6a7870]"
                 title="Apply filters to enable export"
               >
                 Apply filters to enable export
@@ -340,7 +340,7 @@ export function TopTractsPanel({
                 applyFilters();
                 setRankingFiltersOpen(false);
               }}
-              className="w-full rounded-xl bg-[#2d2d2d] py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1f1f1f]"
+              className="w-full rounded-xl bg-[#1c2823] py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#121a17]"
             >
               Apply filters
             </button>
@@ -350,7 +350,7 @@ export function TopTractsPanel({
                 resetRankingFilters();
                 setRankingFiltersOpen(false);
               }}
-              className="w-full rounded-xl border border-[#d6cfc7] bg-white py-2 text-sm font-semibold text-[#5c534c] shadow-sm hover:bg-[#faf8f5]"
+              className="w-full rounded-xl border border-[#c5d0c8] bg-white py-2 text-sm font-semibold text-[#516158] shadow-sm hover:bg-[#f4f7f5]"
             >
               Reset filters
             </button>
@@ -359,9 +359,9 @@ export function TopTractsPanel({
       ) : null}
 
       <div className="space-y-0 px-3 pb-3 pt-2">
-        <p className="px-1 text-[11px] text-[#8e8e8e]">{stateLabel}</p>
+        <p className="px-1 text-[11px] text-[#6a7870]">{stateLabel}</p>
         {!stateFips && (
-          <p className="mt-2 px-1 text-xs leading-relaxed text-[#6b6560]">
+          <p className="mt-2 px-1 text-xs leading-relaxed text-[#516158]">
             Click a state on the map (highlighted) to load tract rankings.
           </p>
         )}
@@ -377,7 +377,7 @@ export function TopTractsPanel({
         )}
       </div>
 
-      <ul className="max-h-[min(52vh,28rem)] divide-y divide-[#ebe6df] overflow-y-auto overscroll-contain">
+      <ul className="max-h-[min(52vh,28rem)] divide-y divide-[#dce3de] overflow-y-auto overscroll-contain">
         {ranked.slice(0, 16).map((r) => {
           const label = r.name ?? `Tract ${r.geoid}`;
           const inTray = compareTray.includes(r.geoid);
@@ -391,23 +391,23 @@ export function TopTractsPanel({
           const scoreTone =
             score != null
               ? score >= SCORE_HIGH_THRESHOLD
-                ? "bg-[#e8c9a5] text-[#2d2d2d]"
+                ? "bg-[#e8b2a8] text-[#1c2823]"
                 : score >= SCORE_MID_THRESHOLD
-                  ? "bg-[#efe0d0] text-[#2d2d2d]"
-                  : "bg-[#f4ebe4] text-[#5c534c]"
-              : "bg-[#ebe6df] text-[#8e8e8e]";
+                  ? "bg-[#f0d4ce] text-[#1c2823]"
+                  : "bg-[#e6eeea] text-[#516158]"
+              : "bg-[#dce3de] text-[#6a7870]";
           const secondary = [r.county_name].filter(Boolean).join(" · ") || "—";
           return (
             <li
               key={r.geoid}
-              className={`flex items-center gap-2 px-3 py-2.5 transition ${isSel ? "bg-[#f6e9e4]" : "hover:bg-[#faf6f0]"}`}
+              className={`flex items-center gap-2 px-3 py-2.5 transition ${isSel ? "bg-[#f4e6e3] hover:bg-[#ead6d0]" : "hover:bg-[#eef2ef]"}`}
             >
               <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums ${scoreTone}`}>
                 {scoreDisplay}
               </span>
               <button type="button" onClick={() => onSelectTract(r.geoid)} className="min-w-0 flex-1 text-left">
-                <p className="truncate text-sm font-semibold text-[#2d2d2d]">{label}</p>
-                <p className="truncate text-[11px] text-[#8e8e8e]">{secondary}</p>
+                <p className="truncate text-sm font-semibold text-[#1c2823]">{label}</p>
+                <p className="truncate text-[11px] text-[#6a7870]">{secondary}</p>
               </button>
               <button
                 type="button"
@@ -417,8 +417,8 @@ export function TopTractsPanel({
                 }
                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-semibold leading-none transition ${
                   inTray
-                    ? "bg-[#b34d3a] text-white shadow-sm"
-                    : "border border-[#d6cfc7] bg-white text-[#2d2d2d] hover:border-[#b34d3a]/50"
+                    ? "bg-[#b42318] text-white shadow-sm"
+                    : "border border-[#c5d0c8] bg-white text-[#1c2823] hover:border-[#b42318]/50"
                 }`}
               >
                 {inTray ? "✓" : "+"}

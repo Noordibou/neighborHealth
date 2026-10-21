@@ -1,6 +1,6 @@
 "use client";
 
-import "maplibre-gl/dist/maplibre-gl.css";
+
 import maplibregl from "maplibre-gl";
 import type { MutableRefObject, ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,7 +47,6 @@ const METRICS = [
   { id: "uninsured_pct", label: "Uninsured (access)" },
   { id: "asthma_pct", label: "Asthma prevalence" },
   { id: "mental_health_pct", label: "Mental health" },
-  { id: "heat_index", label: "Heat index (proxy)" },
 ] as const;
 
 function strProp(p: Record<string, unknown>, k: string): string | null {
@@ -71,7 +70,7 @@ function numProp(p: Record<string, unknown>, k: string): number | null {
  * Fill color for tracts with no value for the active choropleth metric (distinct from the teal value ramp).
  * Referenced in the map legend.
  */
-const NO_DATA_CHOROPLETH_FILL = "#f5e6d8";
+const NO_DATA_CHOROPLETH_FILL = "#e3ebe6";
 
 type HoverInfo = {
   geoid: string;
@@ -81,9 +80,40 @@ type HoverInfo = {
   state_postal: string | null;
   composite_score: number | null;
   rent_burden_pct: number | null;
+  overcrowding_pct: number | null;
+  structural_vacancy_rate: number | null;
   uninsured_pct: number | null;
   asthma_pct: number | null;
+  mental_health_pct: number | null;
+  housing_stress: number | null;
+  health_burden: number | null;
+  housing_class: number | null;
+  health_class: number | null;
 };
+
+type HoverRow = { label: string; value: string };
+
+function fmtIndex(v: number | null): string {
+  return v != null && Number.isFinite(v) ? String(Math.round(v)) : "—";
+}
+
+function fmtPctVal(v: number | null, digits = 1): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return `${digits ? v.toFixed(digits) : Math.round(v)}%`;
+}
+
+function tertileWord(n: number | null): string | null {
+  if (n === 1) return "low";
+  if (n === 2) return "mid";
+  if (n === 3) return "high";
+  return null;
+}
+
+function indexWithTertile(value: number | null, klass: number | null): string {
+  const n = fmtIndex(value);
+  const word = tertileWord(klass);
+  return word && n !== "—" ? `${n} · ${word}` : n;
+}
 
 function propsToHover(p: Record<string, unknown> | null | undefined): HoverInfo | null {
   if (!p || typeof p.geoid !== "string") return null;
@@ -97,23 +127,77 @@ function propsToHover(p: Record<string, unknown> | null | undefined): HoverInfo 
     state_postal: statePostalFromFips(stateFips),
     composite_score: numProp(p, "composite_score"),
     rent_burden_pct: numProp(p, "rent_burden_pct"),
+    overcrowding_pct: numProp(p, "overcrowding_pct"),
+    structural_vacancy_rate: numProp(p, "structural_vacancy_rate"),
     uninsured_pct: numProp(p, "uninsured_pct"),
     asthma_pct: numProp(p, "asthma_pct"),
+    mental_health_pct: numProp(p, "mental_health_pct"),
+    housing_stress: numProp(p, "nh_housing_stress_raw"),
+    health_burden: numProp(p, "nh_health_burden_raw"),
+    housing_class: numProp(p, "nh_housing_class"),
+    health_class: numProp(p, "nh_health_class"),
   };
 }
 
-function hoverHasShownMetrics(h: HoverInfo): boolean {
-  return (
-    h.composite_score != null ||
-    h.rent_burden_pct != null ||
-    h.uninsured_pct != null ||
-    h.asthma_pct != null
-  );
+/** Rows for the active explore layer, or the single metric chosen in the map color menu. */
+function hoverRowsForLayer(h: HoverInfo, kind: ExploreLayerMode | null, metricKey: string): HoverRow[] {
+  if (kind === "housing") {
+    return [
+      { label: "Housing stress", value: fmtIndex(h.housing_stress) },
+      { label: "Rent burden", value: fmtPctVal(h.rent_burden_pct, 0) },
+      { label: "Overcrowding", value: fmtPctVal(h.overcrowding_pct) },
+      { label: "Structural vacancy", value: fmtPctVal(h.structural_vacancy_rate) },
+    ];
+  }
+  if (kind === "health") {
+    return [
+      { label: "Health burden", value: fmtIndex(h.health_burden) },
+      { label: "Uninsured", value: fmtPctVal(h.uninsured_pct) },
+      { label: "Asthma", value: fmtPctVal(h.asthma_pct) },
+      { label: "Mental health", value: fmtPctVal(h.mental_health_pct) },
+    ];
+  }
+  if (kind === "overlap") {
+    return [
+      { label: "Housing stress", value: indexWithTertile(h.housing_stress, h.housing_class) },
+      { label: "Health burden", value: indexWithTertile(h.health_burden, h.health_class) },
+    ];
+  }
+  if (kind === "composite" || metricKey === "composite_score" || metricKey === "nh_map_value") {
+    return [
+      { label: "Composite risk", value: fmtIndex(h.composite_score) },
+      { label: "Rent burden", value: fmtPctVal(h.rent_burden_pct, 0) },
+      { label: "Uninsured", value: fmtPctVal(h.uninsured_pct) },
+      { label: "Overcrowding", value: fmtPctVal(h.overcrowding_pct) },
+      { label: "Mental health", value: fmtPctVal(h.mental_health_pct) },
+      { label: "Asthma", value: fmtPctVal(h.asthma_pct) },
+      { label: "Structural vacancy", value: fmtPctVal(h.structural_vacancy_rate) },
+    ];
+  }
+  const metric = METRICS.find((m) => m.id === metricKey);
+  const raw = numPropFromHover(h, metricKey);
+  const value = metricKey === "composite_score" ? fmtIndex(raw) : fmtPctVal(raw, metricKey === "rent_burden_pct" ? 0 : 1);
+  return [{ label: metric?.label ?? "Value", value }];
+}
+
+function numPropFromHover(h: HoverInfo, key: string): number | null {
+  if (key === "composite_score") return h.composite_score;
+  if (key === "rent_burden_pct") return h.rent_burden_pct;
+  if (key === "overcrowding_pct") return h.overcrowding_pct;
+  if (key === "structural_vacancy_rate") return h.structural_vacancy_rate;
+  if (key === "uninsured_pct") return h.uninsured_pct;
+  if (key === "asthma_pct") return h.asthma_pct;
+  if (key === "mental_health_pct") return h.mental_health_pct;
+  return null;
+}
+
+function hoverHasShownMetrics(rows: HoverRow[]): boolean {
+  return rows.some((r) => r.value !== "—" && !r.value.startsWith("—"));
 }
 
 /** Hover card size used to clamp position inside the map shell. */
 const HOVER_TIP_W = 272;
-const HOVER_TIP_H = 220;
+const HOVER_TIP_H = 280;
 
 function clampHoverTip(
   shellW: number,
@@ -171,7 +255,7 @@ type Props = {
   fillLegendKind?: ExploreLayerMode | null;
   /**
    * When "bivariate", tract fill uses `nh_bivariate_class` + `BIVARIATE_COLORS` (numeric ramp skipped).
-   * Does not change `effectiveKey` / hover metrics — only map fill paint.
+   * Hover rows follow `fillLegendKind` (or the metric menu when no explore layer is set).
    */
   choroplethStyle?: "ramp" | "bivariate";
   /**
@@ -341,9 +425,9 @@ function choroplethNoDataExpr(key: string): unknown[] {
   return ["any", ["!", ["has", key]], ["==", ["get", key], ["literal", null]]];
 }
 
-/** Five-stop ramp: cream → sand → terracotta → deep brick → near-black. */
+/** Five-stop burden ramp, kept separate from the interface ink. */
 const CHORO_STOP_FRACS = [0, 0.22, 0.48, 0.74, 1] as const;
-const CHORO_COLORS = ["#faf6ef", "#e8c4b0", "#d4896e", "#b85c3a", "#2c1810"] as const;
+const CHORO_COLORS = ["#f3f0e6", "#f0c98a", "#e07a3d", "#c23b22", "#5c1a14"] as const;
 
 /** Stable key order for MapLibre `match` on `nh_bivariate_class`. */
 const BIVARIATE_CLASS_KEYS = ["1-1", "1-2", "1-3", "2-1", "2-2", "2-3", "3-1", "3-2", "3-3"] as const;
@@ -360,7 +444,7 @@ function bivariateFillColorExpr(): unknown[] {
 /** Short numeric label for a choropleth legend bound (e.g. "32%" for a pct metric, "47" for composite). */
 function formatLegendBound(value: number, key: string): string {
   const rounded = Math.round(value);
-  if (key === "composite_score" || key === "nh_map_value" || key === "heat_index") return String(rounded);
+  if (key === "composite_score" || key === "nh_map_value") return String(rounded);
   if (key.endsWith("_pct") || key === "structural_vacancy_rate") return `${rounded}%`;
   return String(rounded);
 }
@@ -552,14 +636,14 @@ function NeighborMapInner({
     const sel = selectedGeoid?.trim() ?? "";
     const isSelected: unknown[] =
       sel.length > 0 ? (["==", ["to-string", ["get", "geoid"]], sel] as unknown[]) : (["literal", false] as unknown[]);
-    /** Selected: terracotta ring. No-data tracts: soft peach. Default outlines: dark teal (distinct from selection). */
+    /** Selected: survey red. No-data tracts: mineral gray. Default outlines: dark teal. */
     return {
       "line-color": [
         "case",
         isSelected,
-        "#c45c3e",
+        "#b42318",
         noData,
-        "#d6a889",
+        "#a8b5ae",
         "#042f2e",
       ],
       "line-width": [
@@ -786,9 +870,6 @@ function NeighborMapInner({
     setHoverCard(null);
   }, [data, boundsKey, choroplethStyle]);
 
-  const fmtPct = (v: number | null, digits = 0) =>
-    v != null && Number.isFinite(v) ? `${digits ? v.toFixed(digits) : Math.round(v)}%` : "—";
-
   const hoverLegend =
     hoverCard && hasTracts ? (() => {
       const { info } = hoverCard;
@@ -798,13 +879,14 @@ function NeighborMapInner({
         county_name: info.county_name,
         statePostal: info.state_postal,
       });
-      const hasMetrics = hoverHasShownMetrics(info);
+      const rows = hoverRowsForLayer(info, fillLegendKind, effectiveKey);
+      const hasMetrics = hoverHasShownMetrics(rows);
       return (
         <div
           className="pointer-events-none absolute z-20 w-[17rem] max-w-[calc(100%-1rem)]"
           style={{ left: hoverCard.left, top: hoverCard.top }}
         >
-          <div className="max-h-[13.75rem] overflow-y-auto overscroll-contain rounded-xl border border-nh-brown/40 bg-nh-brown/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm">
+          <div className="max-h-[16rem] overflow-y-auto overscroll-contain rounded-xl border border-nh-brown/40 bg-nh-brown/95 px-4 py-3 text-left text-white shadow-xl backdrop-blur-sm">
             <p className="mt-1 break-words text-sm font-semibold leading-snug">{headline}</p>
             {subline ? (
               <p className="mt-0.5 break-words text-xs leading-snug text-slate-300">{subline}</p>
@@ -816,17 +898,13 @@ function NeighborMapInner({
                 year).
               </p>
             ) : (
-              <dl className="mt-2 grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-3 gap-y-1 border-t border-white/10 pt-2 text-xs">
-                <dt className="text-slate-400">Composite risk</dt>
-                <dd className="font-medium text-nh-cream">
-                  {info.composite_score != null ? Math.round(info.composite_score) : "—"}
-                </dd>
-                <dt className="text-slate-400">Rent burden</dt>
-                <dd>{fmtPct(info.rent_burden_pct)}</dd>
-                <dt className="text-slate-400">Uninsured</dt>
-                <dd>{fmtPct(info.uninsured_pct, 1)}</dd>
-                <dt className="text-slate-400">Asthma</dt>
-                <dd>{fmtPct(info.asthma_pct, 1)}</dd>
+              <dl className="mt-2 grid grid-cols-[minmax(0,8.5rem)_1fr] gap-x-3 gap-y-1 border-t border-white/10 pt-2 text-xs">
+                {rows.map((row, i) => (
+                  <div key={row.label} className="contents">
+                    <dt className="text-slate-400">{row.label}</dt>
+                    <dd className={i === 0 ? "font-medium text-nh-cream" : undefined}>{row.value}</dd>
+                  </div>
+                ))}
               </dl>
             )}
           </div>
@@ -995,7 +1073,8 @@ function NeighborMapInner({
           </p>
           <p className="mt-2">
             Shading still interpolates across <strong>{rampLoDisp}</strong>–<strong>{rampHiDisp}</strong> so similar
-            indexes look more distinct (contrast ramp). Tract popovers and profiles show raw % where applicable.
+            indexes look more distinct (contrast ramp). The hover card shows the index for the active layer, plus the
+            raw indicators that feed it. Tract profiles show raw % where applicable.
           </p>
           {fillLegendKind === "housing" || fillLegendKind === "health" ? (
             <p className="mt-2 text-nh-brown-muted">
@@ -1030,7 +1109,7 @@ function NeighborMapInner({
       </div>
       {effectiveKey === "nh_map_value" && choroplethRange != null ? (
         <p className="mt-1 shrink-0 text-[9px] leading-tight text-nh-brown-muted break-words">
-          Contrast ramp: {rampLoDisp}–{rampHiDisp}. Hover a tract for raw indicators.
+          Contrast ramp: {rampLoDisp}–{rampHiDisp}. Hover a tract for this layer’s indicators.
         </p>
       ) : null}
       <div className="mt-2 flex shrink-0 items-start gap-2 rounded-md border border-orange-200 bg-orange-50/95 px-2 py-1.5">
@@ -1092,11 +1171,11 @@ function NeighborMapInner({
       <div className="rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-nh-brown-muted">Data coverage</p>
         <div className="mt-2 flex items-center gap-2 text-[10px] text-nh-brown-muted">
-          <span className="h-3 w-5 shrink-0 rounded-sm bg-[#d4896e]/80 ring-1 ring-nh-brown/15" aria-hidden />
+          <span className="h-3 w-5 shrink-0 rounded-sm bg-[#c46a4a]/80 ring-1 ring-nh-brown/15" aria-hidden />
           Tracts loaded in app
         </div>
         <div className="mt-1.5 flex items-center gap-2 text-[10px] text-nh-brown-muted">
-          <span className="h-3 w-5 shrink-0 rounded-sm bg-[#e8dfd6] ring-1 ring-nh-brown/10" aria-hidden />
+          <span className="h-3 w-5 shrink-0 rounded-sm bg-[#d5ddd6] ring-1 ring-nh-brown/10" aria-hidden />
           Not available yet
         </div>
       </div>
@@ -1146,8 +1225,8 @@ function NeighborMapInner({
               "fill-color": [
                 "case",
                 ["==", ["get", "nh_has_data"], true],
-                "#d4896e",
-                "#e8dfd6",
+                "#c46a4a",
+                "#d5ddd6",
               ],
               "fill-opacity": ["case", ["==", ["get", "nh_has_data"], true], 0.45, 0.18],
             }}
@@ -1157,7 +1236,7 @@ function NeighborMapInner({
             type="line"
             beforeId={basemapLabelBeforeId}
             paint={{
-              "line-color": "#2c1810",
+              "line-color": "#1c2823",
               "line-width": 0.65,
               "line-opacity": 0.35,
             }}

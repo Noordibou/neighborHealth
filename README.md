@@ -144,8 +144,7 @@ python scripts/load_hrsa_clinics.py
 
 ## Known limitations and technical debt
 
-- **~29.5% of US census tracts unscored** due to CDC PLACES coverage gaps, predominantly rural and very low-population tracts. A tract must have all 7 metrics present to receive a composite score.
-- **Heat index is a latitude-based proxy** (`clamp(150 − 3 × lat, 0, 100)`) — not measured heat data. It does not account for urban heat island effects or altitude.
+- **~29.5% of US census tracts unscored** due to CDC PLACES coverage gaps, predominantly rural and very low-population tracts. A tract must have all 6 scored metrics present to receive a composite score.
 - **ACS 5-year estimates have overlapping survey years.** The trend chart between consecutive vintages reflects partially the same underlying respondents.
 - **Structural vacancy rate has directional ambiguity** in resort and rural areas where seasonal vacancies (`B25004_006E`) are excluded but vacancy can still appear elevated.
 

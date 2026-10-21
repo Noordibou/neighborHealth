@@ -51,7 +51,7 @@ export function CompareTrendChart({ series }: { series: TractTrendSeries[] }) {
         <div className="h-[280px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ebe6df" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#dce3de" />
               <XAxis dataKey="year" tick={{ fontSize: 12 }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} width={36} />
               <Tooltip

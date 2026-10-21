@@ -6,7 +6,7 @@ import type { TractScorePoint, TrendChartProps } from "@/types";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { TooltipProps } from "recharts";
 
-const TREND_STROKE = "#c45c3e";
+const TREND_STROKE = "#b42318";
 
 // ─── Pure helpers (exported for testing) ────────────────────────────────────
 
@@ -163,7 +163,7 @@ export function TrendChart({ geoid, has_trend }: TrendChartProps) {
               type="number"
               domain={["dataMin", "dataMax"]}
               ticks={displayed.map((d) => d.year)}
-              tick={{ fontSize: 10, fill: "#5c4033" }}
+              tick={{ fontSize: 10, fill: "#516158" }}
               tickFormatter={(v) => String(Math.round(Number(v)))}
               axisLine={false}
               tickLine={false}

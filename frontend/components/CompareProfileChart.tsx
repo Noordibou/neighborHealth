@@ -47,7 +47,7 @@ export default function CompareProfileChart({ lineData, series, raw_indicators }
       const metricName = METRIC_LABELS[mk];
       return (
         <div
-          className="max-w-[260px] rounded-xl border border-[#e8dfd4] bg-white px-3 py-2 text-xs text-nh-brown shadow-sm"
+          className="max-w-[260px] rounded-xl border border-[#d3ddd6] bg-white px-3 py-2 text-xs text-nh-brown shadow-sm"
           style={{ borderRadius: 12 }}
         >
           <p className="font-semibold text-nh-brown">{metricName}</p>
@@ -89,19 +89,19 @@ export default function CompareProfileChart({ lineData, series, raw_indicators }
         <div className="mt-2 h-[360px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={lineData} margin={{ top: 8, right: 8, left: 0, bottom: 56 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e8dfd4" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#d3ddd6" />
               <XAxis
                 dataKey="metric"
-                tick={{ fontSize: 9, fill: "#5c4033" }}
+                tick={{ fontSize: 9, fill: "#516158" }}
                 interval={0}
                 angle={-35}
                 textAnchor="end"
                 height={78}
               />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#5c4033" }} width={32} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#516158" }} width={32} />
               <Tooltip
                 content={tooltipContent}
-                cursor={{ stroke: "#e8dfd4", strokeWidth: 1 }}
+                cursor={{ stroke: "#d3ddd6", strokeWidth: 1 }}
                 wrapperStyle={{ outline: "none" }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />

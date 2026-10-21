@@ -23,7 +23,7 @@ from app.schemas.tract import (
     TractSummary,
 )
 from app.services.ai_service import get_or_create_summary
-from app.services.risk_score import DEFAULT_WEIGHTS, METRIC_KEYS, TractValues, clamp_weights, compute_batch_scores
+from app.services.risk_score import METRIC_KEYS, TractValues, clamp_weights, compute_batch_scores
 from app.services.score_recalc import get_cached_default_scores, get_cached_metric_map, resolve_year
 from app.services.tract_list_filters import (
     TractListFilterParams,
@@ -180,7 +180,7 @@ async def get_tract(
             percentile_county=i.percentile_county,
         )
         for i in all_inds
-        if i.metric_name not in _DISPLAY_ONLY_METRIC_NAMES
+        if i.metric_name in METRIC_KEYS
     ]
     display_indicators = [
         DisplayIndicator(
@@ -238,8 +238,9 @@ async def get_tract(
         )
 
     ind_by_metric = {i.metric_name: i for i in all_inds}
+    _w = clamp_weights(None)
     _sc_parts = [
-        DEFAULT_WEIGHTS[m] * (ind_by_metric[m].percentile_state or 50.0)
+        _w[m] * (ind_by_metric[m].percentile_state or 50.0)
         for m in METRIC_KEYS
         if m in ind_by_metric
     ]
@@ -390,7 +391,6 @@ async def get_tract_score(
     uninsured_pct: float | None = None,
     asthma_pct: float | None = None,
     mental_health_pct: float | None = None,
-    heat_index: float | None = None,
 ) -> TractScoreDetail:
     weights = _weights_from_query(
         rent_burden_pct=rent_burden_pct,
@@ -399,7 +399,6 @@ async def get_tract_score(
         uninsured_pct=uninsured_pct,
         asthma_pct=asthma_pct,
         mental_health_pct=mental_health_pct,
-        heat_index=heat_index,
     )
     w = clamp_weights(weights)
 

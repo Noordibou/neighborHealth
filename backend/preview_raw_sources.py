@@ -36,7 +36,6 @@ INGEST_FIELD_NOTES: dict[str, str] = {
     "asthma_pct": "Stored from PLACES field casthma_crudeprev (crude prevalence).",
     "uninsured_pct": "Stored from PLACES field access2_crudeprev (labeled access2 in source).",
     "disability_pct": "Stored from PLACES field disability_crudeprev.",
-    "heat_index": "Not from these APIs; computed from tract centroid latitude in ingest.",
 }
 
 
