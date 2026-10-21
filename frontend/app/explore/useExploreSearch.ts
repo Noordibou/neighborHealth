@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   postMapTractsByGeoids,
   searchFromAddress,
@@ -22,6 +21,7 @@ export function useExploreSearch({
   initialStateFips,
   clearViewport,
   onSelectState,
+  onFocusGeoid,
   setMapMode,
   setSearchGeojson,
   setSearchResults,
@@ -35,6 +35,8 @@ export function useExploreSearch({
   initialStateFips: string | null;
   clearViewport: () => void;
   onSelectState: (fips: string) => void;
+  /** Open an 11-digit tract id on the explore map instead of leaving for the profile. */
+  onFocusGeoid?: (geoid: string) => void;
   setMapMode: (mode: "browse" | "search") => void;
   setSearchGeojson: (fc: GeoJSON.FeatureCollection | null) => void;
   setSearchResults: (results: SearchResultRow[] | null) => void;
@@ -43,7 +45,6 @@ export function useExploreSearch({
   setSearchMapLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setSearchZoomKey: React.Dispatch<React.SetStateAction<number>>;
 }) {
-  const router = useRouter();
   const [q, setQ] = useState(initialQ);
   const [searchNarrowFips, setSearchNarrowFips] = useState<string | null>(initialStateFips);
   const [suggestions, setSuggestions] = useState<SearchSuggestItem[]>([]);
@@ -165,26 +166,17 @@ export function useExploreSearch({
     ]
   );
 
-  // If ?q= is an 11-digit GEOID on load, jump to tract profile once. Otherwise run a map search
-  // (so place queries like "Citrus Heights" with ?state=06 show hits on the map).
+  // Run the landing-page query on every visit. A one-shot sessionStorage flag skipped
+  // later clicks, and GEOID queries used to replace the explorer with the tract profile.
   useEffect(() => {
     if (!initialQ) return;
     const t = initialQ.trim();
     const isGeoid = /^\d{11}$/.test(t);
-    const key = `nh-explore-init-${isGeoid ? "g" : "m"}-${t}-${initialStateFips ?? ""}`;
-    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(key)) return;
     let cancelled = false;
     void (async () => {
       try {
-        if (isGeoid) {
-          if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, "1");
-          if (!cancelled) router.replace(`/tract/${t}`);
-          return;
-        }
         const ok = await runSearchOnMap(t, initialStateFips ?? undefined);
-        if (!cancelled && ok && typeof sessionStorage !== "undefined") {
-          sessionStorage.setItem(key, "1");
-        }
+        if (!cancelled && ok && isGeoid) onFocusGeoid?.(t);
       } catch {
         /* stay on explore */
       }
@@ -192,7 +184,7 @@ export function useExploreSearch({
     return () => {
       cancelled = true;
     };
-  }, [initialQ, initialStateFips, router, runSearchOnMap]);
+  }, [initialQ, initialStateFips, onFocusGeoid, runSearchOnMap]);
 
   const clearSearch = useCallback(() => {
     setQ("");

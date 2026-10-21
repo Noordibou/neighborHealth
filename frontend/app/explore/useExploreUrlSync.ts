@@ -115,7 +115,7 @@ export function useExploreUrlSync({
       setStateFips(sf);
       setSelectedGeoid(parsed.tract);
     } else if (parsed.stateFromUrl) {
-      setStateFips((prev) => (prev == null ? parsed.stateFromUrl : prev));
+      setStateFips(parsed.stateFromUrl);
     }
     if (parsed.layer !== null) setLayerMode(parsed.layer);
     if (parsed.minRent !== null) {
@@ -257,6 +257,8 @@ export function useExploreUrlSync({
     (v: Viewport) => {
       if (typeof window !== "undefined" && Date.now() < suppressViewportUrlUntilRef.current) return;
       if (mapMode === "browse" && !stateFips) return;
+      // MapLibre's default camera is 0,0 at zoom 0 before initialViewState applies.
+      if (v.zoom < 1) return;
       pendingViewportRef.current = v;
       if (viewportDebounceRef.current != null) window.clearTimeout(viewportDebounceRef.current);
       viewportDebounceRef.current = window.setTimeout(() => {

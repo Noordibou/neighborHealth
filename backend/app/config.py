@@ -19,9 +19,6 @@ class Settings(BaseSettings):
     )
 
     database_url: str = "postgresql+asyncpg://neighborhealth:neighborhealth@localhost:5432/neighborhealth"
-    jwt_secret: str = "change-me-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60 * 24 * 7
 
     anthropic_api_key: Optional[str] = None
     mapbox_token: Optional[str] = None

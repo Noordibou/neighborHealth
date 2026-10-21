@@ -1,4 +1,6 @@
 import {
+  EXPLORE_MAP_SESSION_KEY,
+  getInitialExploreBrowseStateFips,
   parseExploreMapSession,
   parseSearchGeoids,
   parseSearchResults,
@@ -35,6 +37,48 @@ describe("parseSearchResults", () => {
     expect(out![0].geoid).toBe("48123456700");
     expect(out![1].state_fips).toBe("06");
     expect(out![1].composite_score).toBeNull();
+  });
+});
+
+describe("getInitialExploreBrowseStateFips", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("prefers the state query over a saved explore session", () => {
+    sessionStorage.setItem(
+      EXPLORE_MAP_SESSION_KEY,
+      JSON.stringify({
+        v: 1,
+        mapMode: "search",
+        q: "Citrus Heights",
+        searchNarrowFips: "06",
+        stateFips: "06",
+        searchResults: null,
+        searchGeoids: ["06067008139"],
+        searchInfo: null,
+        searchZoomKey: 1,
+      })
+    );
+    expect(getInitialExploreBrowseStateFips("?state=48", false)).toBe("48");
+  });
+
+  it("uses the saved session when the URL has no state", () => {
+    sessionStorage.setItem(
+      EXPLORE_MAP_SESSION_KEY,
+      JSON.stringify({
+        v: 1,
+        mapMode: "browse",
+        q: "",
+        searchNarrowFips: null,
+        stateFips: "06",
+        searchResults: null,
+        searchGeoids: [],
+        searchInfo: null,
+        searchZoomKey: 0,
+      })
+    );
+    expect(getInitialExploreBrowseStateFips("", false)).toBe("06");
   });
 });
 

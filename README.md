@@ -105,7 +105,6 @@ python scripts/load_hrsa_clinics.py
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
 | `DATABASE_URL` | Yes | Async SQLAlchemy connection string | `postgresql+asyncpg://neighborhealth:neighborhealth@localhost:5432/neighborhealth` |
-| `JWT_SECRET` | Yes | Random 32-byte hex for signing JWTs | `openssl rand -hex 32` |
 | `ANTHROPIC_API_KEY` | No | Claude API key for AI tract summaries | `sk-ant-...` |
 | `CENSUS_API_KEY` | No* | Raises ACS rate limits; required in practice | — |
 | `CDC_API_KEY` | No | Socrata app token for CDC PLACES | — |
@@ -132,8 +131,6 @@ python scripts/load_hrsa_clinics.py
 | `clinics` | HRSA FQHC locations with lat/lng and operational status |
 | `tract_clinics` | Nearest 3 clinics per tract with distance in miles — PK `(geoid, rank)` |
 | `ai_summaries` | Cached LLM-generated tract narrative summaries |
-| `users` | User accounts for saved views |
-| `saved_views` | User-saved filter configurations |
 
 ### Key performance notes
 
@@ -202,14 +199,6 @@ python scripts/load_hrsa_clinics.py
 |--------|------|-------------|
 | `GET` | `/api/map/tracts` | State-level GeoJSON for choropleth (GZip compressed) |
 | `GET` | `/api/states` | States with tract counts |
-
-### Auth
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/auth/register` | Create account |
-| `POST` | `/api/auth/login` | Login (returns JWT) |
-| `GET` | `/api/auth/saved-views` | Retrieve saved filter views |
 
 ---
 

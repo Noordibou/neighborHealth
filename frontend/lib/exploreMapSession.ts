@@ -135,6 +135,8 @@ export function getInitialExploreBrowseStateFips(search: string, skipSession: bo
   if (typeof window === "undefined") return null;
   const parsed = parseExploreUrl(search);
   if (parsed.tract) return parsed.tract.slice(0, 2).padStart(2, "0").slice(0, 2);
+  // A link such as /explore?state=48 must beat a previous visit stored in sessionStorage.
+  if (parsed.stateFromUrl) return parsed.stateFromUrl;
   if (!skipSession) {
     const raw = window.sessionStorage.getItem(EXPLORE_MAP_SESSION_KEY);
     const sess = parseExploreMapSession(raw);
@@ -143,5 +145,5 @@ export function getInitialExploreBrowseStateFips(search: string, skipSession: bo
       if (s.length) return s.padStart(2, "0").slice(0, 2);
     }
   }
-  return parsed.stateFromUrl;
+  return null;
 }

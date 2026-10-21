@@ -146,7 +146,8 @@ function ExploreInner() {
 
   const exploreMapRef = useRef<MapRef | null>(null);
 
-  const skipSessionHydrate = initialQ.length > 0;
+  // ?q= or ?state= is an explicit navigation (home-page Try links). Do not restore the last map.
+  const skipSessionHydrate = initialQ.length > 0 || initialStateFips != null;
 
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
@@ -184,6 +185,11 @@ function ExploreInner() {
     clearViewport();
   }, [clearSearchState, clearViewport]);
 
+  const onFocusGeoid = useCallback((geoid: string) => {
+    setSelectedGeoid(geoid);
+    setStateFips(geoid.slice(0, 2).padStart(2, "0").slice(0, 2));
+  }, []);
+
   const {
     q,
     setQ,
@@ -205,6 +211,7 @@ function ExploreInner() {
       clearSearchMap();
       setStateFips(fips.padStart(2, "0").slice(0, 2));
     },
+    onFocusGeoid,
     setMapMode,
     setSearchGeojson,
     setSearchResults,
@@ -230,6 +237,11 @@ function ExploreInner() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (skipSessionHydrate) {
+      if (!initialQ) {
+        clearSearchState();
+        setQ("");
+        setSearchNarrowFips(null);
+      }
       setSessionReady(true);
       return;
     }
@@ -283,7 +295,7 @@ function ExploreInner() {
     return () => {
       cancelled = true;
     };
-  }, [skipSessionHydrate, initialQ, clearViewport, setQ, setSearchNarrowFips]);
+  }, [skipSessionHydrate, initialQ, clearSearchState, clearViewport, setQ, setSearchNarrowFips]);
 
   useLayoutEffect(() => {
     setCompareTray(readCompareTray());

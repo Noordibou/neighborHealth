@@ -13,11 +13,9 @@ from app.models import (  # noqa: F401
     Clinic,
     Indicator,
     RiskScore,
-    SavedView,
     Tract,
     TractClinic,
     TractDemographics,
-    User,
 )
 
 config = context.config

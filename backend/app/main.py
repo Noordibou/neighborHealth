@@ -13,7 +13,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.admin import router as admin_router
-from app.api.auth_routes import router as auth_router
 from app.api.compare import router as compare_router
 from app.api.export_api import router as export_router
 from app.api.map_layer import router as map_router
@@ -27,13 +26,6 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # FIX 1: warn on default secrets so misconfigured deploys are visible in logs
-    if settings.jwt_secret == "change-me-in-production":
-        log.critical(
-            "SECURITY WARNING: JWT_SECRET is set to the default value. "
-            "Tokens can be forged. Set JWT_SECRET env var before "
-            "deploying to any non-local environment."
-        )
     if "neighborhealth:neighborhealth@localhost" in settings.database_url:
         log.warning(
             "Using default local database URL. Set DATABASE_URL env var "
@@ -102,7 +94,6 @@ app.include_router(compare_router)
 app.include_router(search_router)
 app.include_router(states_router)
 app.include_router(export_router)
-app.include_router(auth_router)
 app.include_router(admin_router)
 
 

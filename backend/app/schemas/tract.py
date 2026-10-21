@@ -192,26 +192,3 @@ class SearchSuggestResponse(BaseModel):
 
 class GeoidsGeoJSONRequest(BaseModel):
     geoids: list[str] = Field(..., min_length=1, max_length=100)
-
-
-class UserCreate(BaseModel):
-    email: str
-    password: str = Field(min_length=8)
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
-
-class SavedViewCreate(BaseModel):
-    name: str
-    geoids: list[str] = Field(min_length=1, max_length=50)
-    filters: dict | None = None
-
-
-class SavedViewOut(BaseModel):
-    id: int
-    name: str
-    geoids: list[str]
-    filters: dict | None = None

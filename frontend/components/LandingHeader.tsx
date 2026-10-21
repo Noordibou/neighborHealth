@@ -17,13 +17,6 @@ export function LandingHeader() {
           <BrandWordmark />
           <div className="flex shrink-0 items-center gap-2 md:order-3 md:justify-end">
             <Link
-              href="#"
-              className="hidden rounded-lg border border-nh-brown/20 px-3 py-2 text-sm font-medium text-nh-brown sm:inline-block"
-              onClick={(e) => e.preventDefault()}
-            >
-              Sign In
-            </Link>
-            <Link
               href="/explore"
               className="rounded-lg bg-nh-brown px-3 py-2 text-sm font-semibold text-nh-cream shadow-sm transition hover:bg-nh-brown/90"
             >

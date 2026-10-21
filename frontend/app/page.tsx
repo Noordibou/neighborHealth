@@ -85,26 +85,23 @@ export default function LandingPage() {
           </div>
           <div className="relative">
             <div className="overflow-hidden rounded-3xl border border-nh-brown/10 bg-white shadow-[0_24px_60px_rgba(44,24,16,0.12)]">
-              <div
-                className="relative aspect-[4/3] w-full bg-gradient-to-br from-nh-cream via-nh-sand to-nh-terracotta/25"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 300'%3E%3Cpath fill='%23c45c3e22' d='M40 200 L120 80 L200 140 L280 60 L360 120 L360 260 L40 260 Z'/%3E%3Cpath fill='%23b85c3a33' d='M60 220 L160 100 L240 160 L320 90 L340 200 L340 260 L60 260 Z'/%3E%3C/svg%3E")`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
-                role="img"
-                aria-label="Decorative map preview with shaded regions"
-              />
-              <div className="absolute left-4 top-4 rounded-full bg-white/95 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-nh-brown shadow">
-                Live · Philadelphia County, PA
-              </div>
-              <div className="absolute bottom-4 left-4 rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 text-[10px] shadow backdrop-blur-sm">
-                <p className="font-semibold uppercase tracking-wide text-nh-brown-muted">Priority index</p>
-                <p className="mt-1 font-mono text-[11px] text-nh-brown">0 — 100 scale</p>
-              </div>
+              <Link href="/explore?state=48" className="relative block aspect-[4/3] w-full">
+                <img
+                  src="/images/explore-texas.jpg"
+                  alt="Texas census tracts shaded by the NeighborHealth composite index"
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+                <div className="absolute left-4 top-4 rounded-full bg-white/95 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-nh-brown shadow">
+                  Texas · composite index
+                </div>
+                <div className="absolute bottom-4 left-4 rounded-lg border border-nh-brown/10 bg-white/95 px-3 py-2 text-[10px] shadow backdrop-blur-sm">
+                  <p className="font-semibold uppercase tracking-wide text-nh-brown-muted">Priority index</p>
+                  <p className="mt-1 font-mono text-[11px] text-nh-brown">0 — 100 scale</p>
+                </div>
+              </Link>
             </div>
             <p className="mt-2 text-center text-[11px] text-nh-brown-muted">
-              Illustrative preview — open the explorer for live data in your states.
+              Snapshot of Texas tracts in the explorer. Basemap © OpenStreetMap contributors.
             </p>
           </div>
         </div>
