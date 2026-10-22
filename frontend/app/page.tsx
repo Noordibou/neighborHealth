@@ -73,7 +73,7 @@ export default function LandingPage() {
               {[
                 { k: "Tracts scored", v: "~28,000" },
                 { k: "Indicators", v: "18" },
-                { k: "Data vintage", v: "ACS 2022" },
+                { k: "Data vintage", v: "ACS 2024" },
               ].map((row) => (
                 <div key={row.k}>
                   <dt className="text-[10px] font-bold uppercase tracking-wider text-nh-brown-muted">{row.k}</dt>

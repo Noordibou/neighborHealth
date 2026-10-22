@@ -87,7 +87,7 @@ function tractCountPhrase(count: number): string {
 }
 
 /** Status line for the year and tracts the map is actually scoring. */
-export function exploreDataStatusLine(opts: {
+function exploreDataStatusLine(opts: {
   year: number | null;
   stateName: string | null;
   stateScored: number | null;
